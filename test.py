@@ -25,9 +25,13 @@ async def main():
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
         await page.goto(URL); await page.wait_for_function('window.__game', timeout=30000)
         await page.wait_for_timeout(2500)
+        check('title overlay visible before start', await page.is_visible('#title'))
+        await page.screenshot(path='screenshot_title.png')
+        await page.click('#title'); await page.wait_for_timeout(1500)
+        check('tap to start hides title', not await page.is_visible('#title') and await page.evaluate('__game.started'))
         await page.screenshot(path='screenshot_start.png')
         check('default view is flat', await page.evaluate('__game.view')=='flat')
-        ht = await page.inner_text('#hint1'); check('first-load hint shown', ht=='Swipe to roll · Hold + drag to slide', ht)
+        ht = await page.inner_text('#hint1'); check('first-load hint shown', ht=='SWIPE TO ROLL · HOLD + DRAG TO SLIDE', ht)
         n = await page.evaluate('__game.dice.length'); check('initial dice spawned', n == 7, str(n))
         for VIEW in ['iso','flat']:
             # clean scenario
@@ -94,6 +98,9 @@ async def main():
 
             await page.wait_for_timeout(900)
             e = await page.evaluate('__game.boardExtents()')
+            EXP = {('iso',390):(298,667),('flat',390):(292,673),('iso',360):(290,631),('flat',360):(284,637)}
+            ex = EXP.get((VIEW,VW))
+            if ex: check(f'[{VIEW}] {VW}x{VH} board position unchanged vs previous build', abs(e['minY']-ex[0])<=1.5 and abs(e['maxY']-ex[1])<=1.5, f"{e['minY']:.0f}..{e['maxY']:.0f} expected {ex}")
             check(f'[{VIEW}] {VW}x{VH} board edges ~touch screen edges (2% margin)', e['minX']/e['W']<0.045 and e['minX']>=0 and e['maxX']<=e['W'] and 1-e['maxX']/e['W']<0.045, f"x {e['minX']:.1f}..{e['maxX']:.1f} of {e['W']:.0f}")
             check(f'[{VIEW}] {VW}x{VH} board bottom on-screen & below HUD', e['maxY']<=e['H'] and e['minY']>=e['hudBottom']-6, f"y {e['minY']:.0f}..{e['maxY']:.0f} of {e['H']:.0f}, hud {e['hudBottom']:.0f}")
             await page.screenshot(path=f'screenshot_fit_{VIEW}_{VW}x{VH}.png')
@@ -153,16 +160,23 @@ async def main():
         # 9) game over: fill board
         await page.evaluate('__game.clear()')
         await page.evaluate('''(()=>{ let k=0; for(let y=0;y<6;y++)for(let x=0;x<6;x++){ __game.place(x,y,((x+2*y)%2)? ((x+y)%3===0?3:5):((y%2)?4:6)); } })()''')
+        await page.evaluate('__game.addScore(__game.best + 500)')
         await page.wait_for_timeout(1200)
         over = await page.evaluate('__game.over'); st = await page.evaluate('__game.dice.map(d=>d.state+d.top).join()')
         check('game over when board full', over, st[:80])
+        await page.wait_for_timeout(1800)
+        check('NEW BEST flourish shown when beating best', await page.is_visible('#newbest'))
         await page.screenshot(path='screenshot_over.png')
-        await page.click('#again'); await page.wait_for_timeout(500)
+        check('PLAY AGAIN visible & big', await page.is_visible('#again') and (await page.locator('#again').bounding_box())['height']>=44)
+        bb = await page.locator('#restart').bounding_box(); check('HUD buttons >=44px hit area', bb['width']>=44 and bb['height']>=44, str(bb))
+        await page.click('#restart'); await page.wait_for_timeout(500)   # top restart must be clickable even on the game-over screen
+        bt = await page.inner_text('#best'); sc_ = await page.evaluate('[__game.score, __game.best]')
+        check('BEST shows saved best, not live score', ('%06d' % sc_[1]) in bt.replace(' ','') or str(sc_[1]) in bt.replace(' ','').lstrip('BEST0'), f'{bt!r} best={sc_[1]}')
         check('restart works', (await page.evaluate('!__game.over && __game.dice.length')) == 7)
         # final nice screenshot: mid game
         await page.evaluate('__game.freezeSpawns(false)'); await page.wait_for_timeout(2600)
         await page.evaluate('__game.setView("iso")'); await page.wait_for_timeout(300); await page.screenshot(path='screenshot_iso.png'); await page.evaluate('__game.setView("flat")'); await page.wait_for_timeout(300); await page.screenshot(path='screenshot_flat.png')
-        await page.click('#view'); await page.wait_for_timeout(600); check('VIEW button toggles to iso', await page.evaluate('__game.view')=='iso' and (await page.inner_text('#view'))=='VIEW: ISO')
+        await page.click('#view'); await page.wait_for_timeout(600); check('VIEW button toggles to iso', await page.evaluate('__game.view')=='iso' and (await page.inner_text('#viewLbl'))=='ISO')
         sc = await page.evaluate('[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.innerWidth, window.innerHeight]')
         check('no page scroll overflow', sc[0]<=sc[2] and sc[1]<=sc[3], str(sc))
         await b.close()

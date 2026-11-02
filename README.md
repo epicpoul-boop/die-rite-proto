@@ -3,3 +3,5 @@ Single-file Three.js prototype (`index.html`). Portrait, swipe a die to roll it.
 Run locally: `python3 -m http.server` and open index.html. Test: `python3 test.py <url>` (Playwright).
 
 Hosted on Railway (Dockerfile + Caddy). Pushes to main auto-deploy.
+
+UI font: Press Start 2P (c) The Press Start 2P Project Authors, SIL OFL 1.1, embedded as base64 woff2 in index.html.
