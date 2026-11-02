@@ -2,6 +2,8 @@ import asyncio, json, sys
 from playwright.async_api import async_playwright
 
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:18431/index.html?seed=7'
+VW = int(sys.argv[2]) if len(sys.argv) > 2 else 390
+VH = int(sys.argv[3]) if len(sys.argv) > 3 else 844
 errors = []; results = []; VIEW='iso'
 def check(name, ok, extra=''):
     results.append((name, bool(ok), extra)); print(('PASS' if ok else 'FAIL'), name, extra)
@@ -17,7 +19,7 @@ async def swipe(page, a, b, steps=6, hold=0.0):
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--enable-webgl'])
-        ctx = await b.new_context(viewport={'width':390,'height':844}, device_scale_factor=2, has_touch=True, is_mobile=True)
+        ctx = await b.new_context(viewport={'width':VW,'height':VH}, device_scale_factor=2, has_touch=True, is_mobile=True)
         page = await ctx.new_page()
         page.on('console', lambda m: errors.append(f'console.{m.type}: {m.text}') if m.type in ('error','warning') else None)
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
@@ -89,6 +91,11 @@ async def main():
             sc = await page.evaluate('__game.score'); check(f'[{VIEW}] score awarded', sc > 0, str(sc))
             check(f'[{VIEW}] sunk dice removed', await page.evaluate('__game.dice.length') == 0, str(await page.evaluate('__game.dice')))
 
+            await page.wait_for_timeout(900)
+            e = await page.evaluate('__game.boardExtents()')
+            check(f'[{VIEW}] {VW}x{VH} board edges ~touch screen edges (2% margin)', e['minX']/e['W']<0.045 and e['minX']>=0 and e['maxX']<=e['W'] and 1-e['maxX']/e['W']<0.045, f"x {e['minX']:.1f}..{e['maxX']:.1f} of {e['W']:.0f}")
+            check(f'[{VIEW}] {VW}x{VH} board bottom on-screen & below HUD', e['maxY']<=e['H'] and e['minY']>=e['hudBottom']-6, f"y {e['minY']:.0f}..{e['maxY']:.0f} of {e['H']:.0f}, hud {e['hudBottom']:.0f}")
+            await page.screenshot(path=f'screenshot_fit_{VIEW}_{VW}x{VH}.png')
             # slide mode: hold ~250ms then drag = move without flipping
             await page.evaluate('__game.clear(); __game.place(2,2,5)')
             pa = await page.evaluate('__game.tileToScreen(2,2)'); pb = await page.evaluate('__game.tileToScreen(3,2)')

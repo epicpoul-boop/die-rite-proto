@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261102-215053">
+<meta name="build" content="20261102-215940">
 <title>DEADROLL – dice prototype</title>
 <style>
   html,body{margin:0;height:100%;background:#050309;overflow:hidden;overscroll-behavior:none;touch-action:none;
@@ -553,13 +553,19 @@ $('snd').addEventListener('click', () => { audioInit(); muted = !muted; $('snd')
 
 /* ---------- layout ---------- */
 const camTarget = new THREE.Vector3(0, 0, 0), camBase = new THREE.Vector3();
-const VIEWS = { iso: { az: Math.PI / 4, tilt: THREE.MathUtils.degToRad(40), dist: 14 }, flat: { az: 0, tilt: THREE.MathUtils.degToRad(27), dist: 12 } };
+const VIEWS = { iso: { az: Math.PI / 4, tilt: THREE.MathUtils.degToRad(40), dist: 14, shift: 100 }, flat: { az: 0, tilt: THREE.MathUtils.degToRad(27), dist: 12, shift: 100 } };
 let view = 'iso'; try { view = localStorage.getItem('deadroll-view') === 'flat' ? 'flat' : 'iso'; } catch (e) { }
-const cam = { az: VIEWS[view].az, tilt: VIEWS[view].tilt, dist: 14 };
+const cam = { az: VIEWS[view].az, tilt: VIEWS[view].tilt, dist: 14, shift: 0 };
+const VIEWS_H = { W: 390, Ht: 844 };
+let lastShift = null;
+function applyShift(force) {
+  if (!force && lastShift !== null && Math.abs(lastShift - cam.shift) < 0.05) return;
+  lastShift = cam.shift; camera.setViewOffset(VIEWS_H.W, VIEWS_H.Ht, 0, -cam.shift, VIEWS_H.W, VIEWS_H.Ht); camera.updateProjectionMatrix();
+}
 function setView(v, instant) {
   view = v; try { localStorage.setItem('deadroll-view', v); } catch (e) { }
   $('view').textContent = v === 'iso' ? 'VIEW: ISO' : 'VIEW: FLAT';
-  if (instant) Object.assign(cam, VIEWS[v]);
+  if (instant) { Object.assign(cam, VIEWS[v]); applyShift(true); }
 }
 $('view').addEventListener('click', () => { audioInit(); setView(view === 'iso' ? 'flat' : 'iso'); sfx('tick', 1.4); });
 function layout() {
@@ -569,13 +575,27 @@ function layout() {
   rt.setSize(tw, th); snapU.value.set(tw, th);
   camera.aspect = W / Ht; camera.fov = 38;
   const vt = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), ht = vt * camera.aspect;
+  /* Fit: solve the camera distance so the board's left/right extremes land at ±FIT of the screen width
+     (perspective-correct, from the real projection), then shift vertically so the whole board sits below the HUD and above the bottom edge. */
+  const tc = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.1, 80), R = N / 2 + 0.3, FIT = 0.96;
+  const rimC = [[-R, 0.12, -R], [R, 0.12, -R], [R, 0.12, R], [-R, 0.12, R]].map((a) => new THREE.Vector3(...a));
+  const topC = rimC.map((c) => c.clone().setY(1.0)), botC = rimC.map((c) => c.clone().setY(-2.4));
+  const place = (V, dist) => { tc.position.set(Math.sin(V.az) * Math.sin(V.tilt) * dist, Math.cos(V.tilt) * dist, Math.cos(V.az) * Math.sin(V.tilt) * dist); tc.lookAt(0, 0, 0); tc.updateMatrixWorld(true); tc.updateProjectionMatrix(); };
+  const hudBottom = $('spawnbar').getBoundingClientRect().bottom - r.top + 14, bandTop = hudBottom, bandBot = Ht - 26;
   for (const k of ['iso', 'flat']) {
-    const V = VIEWS[k], span = k === 'iso' ? N * Math.SQRT2 : N;                    // board width on screen (diamond vs square)
-    const dW = (span + 1.4) / 2 / ht;
-    const dH = (span * Math.cos(V.tilt) + 1.5) / (2 * vt * 0.64);                  // fit the lower ~2/3 of the screen
-    V.dist = Math.max(dW, dH);
+    const V = VIEWS[k]; let lo = 3, hi = 70;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2; place(V, mid);
+      const mx = Math.max(...rimC.map((c) => Math.abs(c.clone().project(tc).x)));
+      if (mx > FIT) lo = mid; else hi = mid;
+    }
+    V.dist = (lo + hi) / 2; place(V, V.dist);
+    const ys = [...topC, ...rimC, ...botC].map((c) => (-c.clone().project(tc).y * 0.5 + 0.5) * Ht);
+    const pyTop = Math.min(...ys), pyBot = Math.max(...ys);
+    V.shift = pyBot - pyTop <= bandBot - bandTop ? (bandTop + bandBot) / 2 - (pyTop + pyBot) / 2 : bandBot - pyBot;
   }
-  camera.setViewOffset(W, Ht, 0, -Ht * 0.15, W, Ht);          // push board down into the lower 2/3
+  VIEWS_H.W = W; VIEWS_H.Ht = Ht;
+  camera.near = 0.1; camera.far = 80; applyShift(true);
   camera.near = 0.1; camera.far = 80; camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', layout); window.addEventListener('orientationchange', () => setTimeout(layout, 120));
@@ -682,7 +702,7 @@ function update(rawDt) {
   // camera + shake
   shake = Math.max(0, shake - rawDt * 1.4);
   const V = VIEWS[view], k = Math.min(1, rawDt * 7);
-  cam.az += (V.az - cam.az) * k; cam.tilt += (V.tilt - cam.tilt) * k; cam.dist += (V.dist - cam.dist) * k;
+  cam.az += (V.az - cam.az) * k; cam.tilt += (V.tilt - cam.tilt) * k; cam.dist += (V.dist - cam.dist) * k; cam.shift += (V.shift - cam.shift) * k; applyShift(false);
   scene.fog.near = cam.dist + 5; scene.fog.far = cam.dist + 22;
   camBase.set(Math.sin(cam.az) * Math.sin(cam.tilt) * cam.dist, Math.cos(cam.tilt) * cam.dist, Math.cos(cam.az) * Math.sin(cam.tilt) * cam.dist);
   camera.position.set(camBase.x + (Math.random() - .5) * shake * 0.4, camBase.y + (Math.random() - .5) * shake * 0.4, camBase.z);
@@ -717,6 +737,12 @@ window.__game = {
   topAt(gx, gy) { const d = grid[gy][gx]; return d ? d.top : null; },
   stateAt(gx, gy) { const d = grid[gy][gx]; return d ? d.state : null; },
   evaluate,
+  boardExtents() {
+    camera.updateMatrixWorld(); const R = N / 2 + 0.3, r = app.getBoundingClientRect();
+    const pts = []; for (const y of [1.0, 0.12, -2.4]) for (const [x, z] of [[-R, -R], [R, -R], [R, R], [-R, R]]) pts.push(new THREE.Vector3(x, y, z).project(camera));
+    const xs = pts.slice(4, 8).map((p) => (p.x * .5 + .5) * r.width), ys = pts.map((p) => (-p.y * .5 + .5) * r.height);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys), W: r.width, H: r.height, hudBottom: document.getElementById('spawnbar').getBoundingClientRect().bottom };
+  },
   get mode() { return drag ? drag.mode : null; },
   get chains() { return chains.map((c) => ({ t: c.t, dur: c.dur, n: dice.filter((d) => d.chain === c).length })); },
   get view() { return view; }, setView(v) { setView(v, true); },
