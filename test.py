@@ -26,6 +26,7 @@ async def main():
         await page.goto(URL); await page.wait_for_function('window.__game', timeout=30000)
         await page.wait_for_timeout(2500)
         await page.screenshot(path='screenshot_start.png')
+        check('default view is flat', await page.evaluate('__game.view')=='flat')
         ht = await page.inner_text('#hint1'); check('first-load hint shown', ht=='Swipe to roll · Hold + drag to slide', ht)
         n = await page.evaluate('__game.dice.length'); check('initial dice spawned', n == 7, str(n))
         for VIEW in ['iso','flat']:
@@ -161,6 +162,7 @@ async def main():
         # final nice screenshot: mid game
         await page.evaluate('__game.freezeSpawns(false)'); await page.wait_for_timeout(2600)
         await page.evaluate('__game.setView("iso")'); await page.wait_for_timeout(300); await page.screenshot(path='screenshot_iso.png'); await page.evaluate('__game.setView("flat")'); await page.wait_for_timeout(300); await page.screenshot(path='screenshot_flat.png')
+        await page.click('#view'); await page.wait_for_timeout(600); check('VIEW button toggles to iso', await page.evaluate('__game.view')=='iso' and (await page.inner_text('#view'))=='VIEW: ISO')
         sc = await page.evaluate('[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.innerWidth, window.innerHeight]')
         check('no page scroll overflow', sc[0]<=sc[2] and sc[1]<=sc[3], str(sc))
         await b.close()

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261102-215940">
+<meta name="build" content="20261102-221150">
 <title>DEADROLL – dice prototype</title>
 <style>
   html,body{margin:0;height:100%;background:#050309;overflow:hidden;overscroll-behavior:none;touch-action:none;
@@ -55,7 +55,7 @@
     <div id="top">
       <div><div class="lbl">SCORE</div><div id="score">0</div><div id="best">BEST 0</div></div>
       <div id="comboBox"><div class="lbl">COMBO</div><div id="combo" class="zero">x0</div></div>
-      <div id="btns"><button id="restart">RESTART</button><button id="view">VIEW: ISO</button><button id="snd">SND ON</button></div>
+      <div id="btns"><button id="restart">RESTART</button><button id="view">VIEW: FLAT</button><button id="snd">SND ON</button></div>
     </div>
     <div id="spawnbar"><i></i></div>
     <div id="toast"></div>
@@ -554,7 +554,7 @@ $('snd').addEventListener('click', () => { audioInit(); muted = !muted; $('snd')
 /* ---------- layout ---------- */
 const camTarget = new THREE.Vector3(0, 0, 0), camBase = new THREE.Vector3();
 const VIEWS = { iso: { az: Math.PI / 4, tilt: THREE.MathUtils.degToRad(40), dist: 14, shift: 100 }, flat: { az: 0, tilt: THREE.MathUtils.degToRad(27), dist: 12, shift: 100 } };
-let view = 'iso'; try { view = localStorage.getItem('deadroll-view') === 'flat' ? 'flat' : 'iso'; } catch (e) { }
+let view = 'flat'; try { view = localStorage.getItem('deadroll-view2') === 'iso' ? 'iso' : 'flat'; } catch (e) { }   // flat is the default; only an explicit user toggle is saved
 const cam = { az: VIEWS[view].az, tilt: VIEWS[view].tilt, dist: 14, shift: 0 };
 const VIEWS_H = { W: 390, Ht: 844 };
 let lastShift = null;
@@ -563,7 +563,7 @@ function applyShift(force) {
   lastShift = cam.shift; camera.setViewOffset(VIEWS_H.W, VIEWS_H.Ht, 0, -cam.shift, VIEWS_H.W, VIEWS_H.Ht); camera.updateProjectionMatrix();
 }
 function setView(v, instant) {
-  view = v; try { localStorage.setItem('deadroll-view', v); } catch (e) { }
+  view = v; if (!instant) { try { localStorage.setItem('deadroll-view2', v); } catch (e) { } }
   $('view').textContent = v === 'iso' ? 'VIEW: ISO' : 'VIEW: FLAT';
   if (instant) { Object.assign(cam, VIEWS[v]); applyShift(true); }
 }
