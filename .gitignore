@@ -1,2 +1,5 @@
 screenshot_*.png
+!screenshot_iso.png
+!screenshot_flat.png
+!screenshot_slide_iso.png
 __pycache__

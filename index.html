@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="build" content="20261102-215053">
 <title>DEADROLL – dice prototype</title>
 <style>
   html,body{margin:0;height:100%;background:#050309;overflow:hidden;overscroll-behavior:none;touch-action:none;
@@ -21,11 +22,11 @@
   #combo{font-size:30px;font-weight:bold;color:#ff7a3a;text-shadow:2px 2px 0 #3a0d14;transition:transform .08s}
   #combo.zero{color:#5a4d70;text-shadow:none}
   #combo.bump{transform:scale(1.35)}
-  #btns{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+  #btns{display:flex;flex-direction:column;gap:5px;align-items:flex-end}
   button{pointer-events:auto;font:bold 12px "Courier New",monospace;letter-spacing:2px;color:#e8dcc0;background:#2a1a3e;border:2px solid #6b4a9a;
-    border-bottom-color:#1a0f28;border-right-color:#1a0f28;padding:0 10px;height:36px;min-width:44px;touch-action:manipulation}
+    border-bottom-color:#1a0f28;border-right-color:#1a0f28;padding:0 10px;height:32px;min-width:44px;touch-action:manipulation}
   button:active{background:#4a2a6e;transform:translateY(1px)}
-  #spawnbar{position:absolute;left:14px;right:14px;top:calc(92px + env(safe-area-inset-top));height:5px;background:#1a1228;border:1px solid #3a2a5c}
+  #spawnbar{position:absolute;left:14px;right:14px;top:calc(126px + env(safe-area-inset-top));height:5px;background:#1a1228;border:1px solid #3a2a5c}
   #spawnbar i{display:block;height:100%;width:0;background:#8a5ad0}
   #toast{position:absolute;left:0;right:0;top:24%;text-align:center;font-size:30px;font-weight:bold;letter-spacing:4px;color:#fff;
     text-shadow:3px 3px 0 #a01830,0 0 18px #ff7a3a;opacity:0;pointer-events:none}
@@ -37,6 +38,7 @@
   @keyframes pop{0%{opacity:0;margin-top:0;scale:.6}15%{opacity:1;scale:1.2}100%{opacity:0;margin-top:-54px;scale:1}}
   #hint{position:absolute;left:0;right:0;padding:0 18px;box-sizing:border-box;bottom:calc(14px + env(safe-area-inset-bottom));text-align:center;font-size:11px;letter-spacing:1.5px;color:#7d7098;line-height:1.6;transition:opacity .6s}
   #hint b{color:#c9b8f0}
+  #hint1{font-size:13px;color:#f1e6c8 !important;letter-spacing:1px;display:inline-block;margin-bottom:4px}
   #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   #over{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(8,3,14,.78);pointer-events:auto;gap:10px}
   #over.show{display:flex}
@@ -53,11 +55,11 @@
     <div id="top">
       <div><div class="lbl">SCORE</div><div id="score">0</div><div id="best">BEST 0</div></div>
       <div id="comboBox"><div class="lbl">COMBO</div><div id="combo" class="zero">x0</div></div>
-      <div id="btns"><button id="restart">RESTART</button><button id="snd">SND ON</button></div>
+      <div id="btns"><button id="restart">RESTART</button><button id="view">VIEW: ISO</button><button id="snd">SND ON</button></div>
     </div>
     <div id="spawnbar"><i></i></div>
     <div id="toast"></div>
-    <div id="hint"><b>SWIPE A DIE</b> TO ROLL IT<br>MATCH <b>N</b> DICE SHOWING <b>N</b> · A <b>1</b> TOUCHING A SINKING CHAIN WIPES ALL 1s</div>
+    <div id="hint"><b id="hint1">Swipe to roll · Hold + drag to slide</b><br>MATCH <b>N</b> DICE SHOWING <b>N</b> · A <b>1</b> TOUCHING A SINKING CHAIN WIPES ALL 1s</div>
     <div id="flash"></div>
     <div id="over"><h1>BOARD FULL</h1><p id="overScore"></p><p id="overBest"></p><button id="again">PLAY AGAIN</button></div>
   </div>
@@ -83,7 +85,10 @@ const N = 6;                 // grid size
 const S = 0.88, H = S / 2;   // die size / half
 const ROLL_T = 0.17;         // roll duration (s)
 const RISE_T = 0.9;          // spawn rise duration
-const SINK_T = 3.0;          // sink duration
+const SINK_T = 6.0;          // chain sink duration (s)
+const JOIN_EXT = 0.8;        // seconds added to a chain when a die joins
+const MAX_REMAIN = 9;        // cap on remaining chain time
+const HOLD_MS = 250;         // press-and-hold time that switches to slide mode
 const TILE_PX = 12;          // drag threshold in px
 const TARGET_W = 320;        // low-res render width
 const params = new URLSearchParams(location.search);
@@ -145,8 +150,8 @@ function psx(mat, k = 0.62) {
 }
 
 /* ---------- lights ---------- */
-scene.add(new THREE.AmbientLight(0x8a7ac0, 2.1));
-const key = new THREE.DirectionalLight(0xffe0b0, 3.4); key.position.set(-4, 9, 5); scene.add(key);
+scene.add(new THREE.AmbientLight(0x9a8ad0, 2.6));
+const key = new THREE.DirectionalLight(0xffe6c0, 3.9); key.position.set(-4, 9, 5); scene.add(key);
 const rim = new THREE.DirectionalLight(0x6a4aff, 1.2); rim.position.set(5, 3, -6); scene.add(rim);
 const glow = new THREE.PointLight(0xff4a2a, 6, 14); glow.position.set(0, -0.5, 0); scene.add(glow);
 
@@ -155,8 +160,8 @@ function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = 
 function nearest(tex) { tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; return tex; }
 function pipTexture(v) {
   const c = mkCanvas(32, 32), g = c.getContext('2d');
-  g.fillStyle = '#cbbd98'; g.fillRect(0, 0, 32, 32);
-  for (let i = 0; i < 110; i++) { g.fillStyle = (i % 3) ? '#bba980' : '#d9ccaa'; g.fillRect((Math.sin(i * 12.9 + v) * 43758 % 1 + 1) % 1 * 32 | 0, (Math.sin(i * 78.2 + v * 3) * 24634 % 1 + 1) % 1 * 32 | 0, 1, 1); }
+  g.fillStyle = '#e6d9b4'; g.fillRect(0, 0, 32, 32);
+  for (let i = 0; i < 110; i++) { g.fillStyle = (i % 3) ? '#d3c39a' : '#efe4c6'; g.fillRect((Math.sin(i * 12.9 + v) * 43758 % 1 + 1) % 1 * 32 | 0, (Math.sin(i * 78.2 + v * 3) * 24634 % 1 + 1) % 1 * 32 | 0, 1, 1); }
   g.fillStyle = '#ebe1c4'; g.fillRect(1, 1, 30, 2); g.fillRect(1, 1, 2, 30);
   g.fillStyle = '#85734f'; g.fillRect(1, 29, 30, 2); g.fillRect(29, 1, 2, 30);
   g.fillStyle = '#3d3224'; g.fillRect(0, 0, 32, 1); g.fillRect(0, 31, 32, 1); g.fillRect(0, 0, 1, 32); g.fillRect(31, 0, 1, 32);
@@ -233,13 +238,13 @@ function randomQuat(wantTop) {
 function dieMaterials(ghost) {
   return FACE_VAL.map((v) => {
     const m = new THREE.MeshLambertMaterial({ map: faceTex[v], transparent: !!ghost, opacity: ghost ? 0.7 : 1, depthWrite: !ghost });
-    if (ghost) m.emissive = new THREE.Color(0x2a9aa8);
+    m.emissive = new THREE.Color(ghost ? 0x2a9aa8 : 0x2b2418);
     return psx(m);
   });
 }
 
 const grid = Array.from({ length: N }, () => Array(N).fill(null));
-let dice = [];
+let dice = [], chains = [];
 const wx = (gx) => gx - (N - 1) / 2;
 
 function makeDie(gx, gy, q, delay) {
@@ -247,7 +252,7 @@ function makeDie(gx, gy, q, delay) {
   mesh.quaternion.copy(q);
   mesh.position.set(wx(gx), -S, wx(gy));
   scene.add(mesh);
-  const d = { mesh, gx, gy, top: topOf(q), state: 'rising', t: -(delay || 0) / RISE_T, bounce: 1, nudge: 0, sinkT: 0, delay: 0, flash: 0, pitchIdx: 0 };
+  const d = { lift: 0, slide: false, chain: null, shown: 0, pts: 0, chainPop: false, mesh, gx, gy, top: topOf(q), state: 'rising', t: -(delay || 0) / RISE_T, bounce: 1, nudge: 0, sinkT: 0, delay: 0, flash: 0, pitchIdx: 0 };
   mesh.userData.die = d;
   grid[gy][gx] = d; dice.push(d);
   return d;
@@ -350,7 +355,7 @@ function popup(txt, pos, cls = '') {
   el.style.left = ((p.x * .5 + .5) * r.width) + 'px'; el.style.top = ((-p.y * .5 + .5) * r.height) + 'px';
   $('hud').appendChild(el); el.addEventListener('animationend', () => el.remove());
 }
-const spawnInterval = () => Math.max(1.5, 3.4 - spawnCount * 0.06);
+const spawnInterval = () => Math.max(2.6, 5.1 - spawnCount * 0.04);
 const emptyTiles = () => { const r = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x]) r.push([x, y]); return r; };
 
 function spawnDie(delay = 0) {
@@ -363,6 +368,7 @@ function spawnDie(delay = 0) {
 }
 function resetGame() {
   for (const d of [...dice]) removeDie(d);
+  chains = [];
   for (const p of parts) scene.remove(p.m); parts = [];
   for (const el of document.querySelectorAll('.pop')) el.remove();
   score = 0; shownScore = 0; spawnT = 0; spawnCount = 0; gameOver = false; freezeT = 0; shake = 0; comboIdle = 0;
@@ -379,16 +385,16 @@ function endGame() {
 }
 
 /* ---------- rolling ---------- */
-function tryRoll(d, dir) {
+function tryRoll(d, dir, slide) {
   if (!d || d.state !== 'idle' || gameOver) return false;
   const tx = d.gx + dir[0], ty = d.gy + dir[1];
   if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) return false;
   grid[d.gy][d.gx] = null; grid[ty][tx] = d;
   d.fromX = d.gx; d.fromY = d.gy; d.gx = tx; d.gy = ty;
-  d.state = 'rolling'; d.t = 0; d.axis = new THREE.Vector3(dir[1], 0, -dir[0]); d.q0 = d.mesh.quaternion.clone();
+  d.state = 'rolling'; d.slide = !!slide; d.t = 0; d.axis = new THREE.Vector3(dir[1], 0, -dir[0]); d.q0 = d.mesh.quaternion.clone();
   d.mesh.scale.set(1, 1, 1);
   rolledOnce = true; $('hint').style.opacity = '0';
-  sfx('tick', 1); vib(8);
+  sfx('tick', slide ? 0.7 : 1); vib(8);
   return true;
 }
 function landed(d) {
@@ -399,9 +405,6 @@ function landed(d) {
 }
 
 /* ---------- matching ---------- */
-function startSink(d, joinFlash) {
-  d.state = 'sinking'; d.sinkT = 0; d.flash = joinFlash ? 1 : 0; d.mesh.scale.set(1, 1, 1);
-}
 function evaluate() {
   const seen = new Set(); let events = 0, lastGroup = null;
   for (const d of dice) {
@@ -411,7 +414,15 @@ function evaluate() {
     const idle = comp.filter((x) => x.state === 'idle'); if (!idle.length) continue;
     const anySink = comp.some((x) => x.state === 'sinking');
     if (anySink || comp.length >= d.top) {
-      idle.forEach((x) => startSink(x, anySink));
+      const sinkers = comp.filter((x) => x.state === 'sinking');
+      let chain;
+      if (sinkers.length) {                       // join (and merge) existing chain(s), extend the timer a little
+        const cs = [...new Set(sinkers.map((x) => x.chain))];
+        chain = cs.reduce((a, b) => (a.dur - a.t >= b.dur - b.t ? a : b));
+        for (const c of cs) if (c !== chain) { dice.forEach((x) => { if (x.chain === c) x.chain = chain; }); chains.splice(chains.indexOf(c), 1); }
+        chain.dur = Math.min(chain.dur + JOIN_EXT, chain.t + MAX_REMAIN);
+      } else { chain = { t: 0, dur: SINK_T }; chains.push(chain); }
+      idle.forEach((x) => { x.state = 'sinking'; x.chain = chain; x.shown = 0; x.flash = sinkers.length ? 1 : 0; x.mesh.scale.set(1, 1, 1); });
       events++; lastGroup = { comp, joined: anySink, n: d.top };
       setCombo(combo + 1); comboIdle = 0;
       const c = new THREE.Vector3(); comp.forEach((x) => c.add(x.mesh.position)); c.multiplyScalar(1 / comp.length); c.y += 0.7;
@@ -449,23 +460,60 @@ function pointerToTile(cx, cy) {
   const gx = Math.floor(p.x + N / 2), gy = Math.floor(p.z + N / 2);
   return gx >= 0 && gy >= 0 && gx < N && gy < N ? [gx, gy] : null;
 }
-function dirFromDrag(vx, vy) { return Math.abs(vx) > Math.abs(vy) ? (vx > 0 ? DIR4.E : DIR4.W) : (vy > 0 ? DIR4.S : DIR4.N); }
-function cancelDrag() { drag = null; ghost.visible = false; selRing.visible = false; tgtRing.visible = false; }
+function projScreen(x, y, z) { const r = app.getBoundingClientRect(); const p = new THREE.Vector3(x, y, z).project(camera); return { x: (p.x * .5 + .5) * r.width, y: (-p.y * .5 + .5) * r.height }; }
+/* Snap the swipe to whichever of the 4 board directions *looks* closest on screen (works for any camera angle). */
+function dirFromDrag(d, vx, vy) {
+  camera.updateMatrixWorld();
+  const base = projScreen(wx(d.gx), H, wx(d.gy)), vl = Math.hypot(vx, vy) || 1; let best = null, bs = -2;
+  for (const k of ['N', 'S', 'E', 'W']) {
+    const dd = DIR4[k], p = projScreen(wx(d.gx) + dd[0], H, wx(d.gy) + dd[1]);
+    const sx = p.x - base.x, sy = p.y - base.y, c = (sx * vx + sy * vy) / ((Math.hypot(sx, sy) || 1) * vl);
+    if (c > bs) { bs = c; best = dd; }
+  }
+  return best;
+}
+const rollQuat = (q, dir) => snapQuat(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(dir[1], 0, -dir[0]), Math.PI / 2).multiply(q));
+/* faint numbers beside the touched die: what ends up on top for a roll each way */
+function digitTex(v, gold) {
+  const c = mkCanvas(32, 32), g = c.getContext('2d'); g.font = 'bold 26px "Courier New",monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#10081c'; for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [2, 2], [-2, 2], [2, -2], [-2, -2]]) g.fillText(String(v), 16 + ox, 17 + oy);
+  g.fillStyle = gold ? '#ffd24a' : '#f4ecff'; g.fillText(String(v), 16, 17); return nearest(new THREE.CanvasTexture(c));
+}
+const digits = [null, 1, 2, 3, 4, 5, 6].map((v) => v && [digitTex(v, false), digitTex(v, true)]);
+const labels = {};
+for (const k of ['N', 'S', 'E', 'W']) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: digits[1][0], transparent: true, opacity: 0.6, depthTest: false, depthWrite: false, fog: false }));
+  sp.scale.set(0.62, 0.62, 1); sp.renderOrder = 7; sp.visible = false; scene.add(sp); labels[k] = sp;
+}
+function updateLabels() {
+  const d = drag && drag.die;
+  for (const k in labels) labels[k].visible = false;
+  if (!d || d.state !== 'idle' || drag.mode === 'slide') return;
+  for (const k in labels) {
+    const dd = DIR4[k], tx = d.gx + dd[0], ty = d.gy + dd[1];
+    if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) continue;
+    const top = topOf(rollQuat(d.mesh.quaternion, dd)), hot = wouldMatch(d, tx, ty, top);
+    labels[k].material.map = digits[top][hot ? 1 : 0]; labels[k].material.opacity = hot ? 0.85 : 0.55;
+    labels[k].position.set(wx(tx), H + 0.35, wx(ty)); labels[k].visible = true;
+  }
+}
+function cancelDrag() { drag = null; ghost.visible = false; selRing.visible = false; tgtRing.visible = false; for (const k in labels) labels[k].visible = false; }
 function updateGhost() {
   ghost.visible = false; tgtRing.visible = false;
   if (!drag || !drag.die) return;
   const d = drag.die; const vx = drag.cx - drag.x0, vy = drag.cy - drag.y0;
   if (d.state !== 'idle' || Math.hypot(vx, vy) < TILE_PX) { drag.dir = null; return; }
-  const dir = dirFromDrag(vx, vy); drag.dir = dir;
+  if (!drag.mode) drag.mode = 'roll';
+  const slide = drag.mode === 'slide';
+  const dir = dirFromDrag(d, vx, vy); drag.dir = dir;
   const tx = d.gx + dir[0], ty = d.gy + dir[1];
   if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) { drag.blocked = true; return; }
   drag.blocked = false;
-  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(dir[1], 0, -dir[0]), Math.PI / 2).multiply(d.mesh.quaternion);
-  const top = topOf(snapQuat(q.clone()));
-  ghost.quaternion.copy(snapQuat(q)); ghost.position.set(wx(tx), H, wx(ty)); ghost.visible = true;
+  const q = slide ? d.mesh.quaternion.clone() : rollQuat(d.mesh.quaternion, dir), top = slide ? d.top : topOf(q);
+  ghost.quaternion.copy(q); ghost.position.set(wx(tx), H, wx(ty)); ghost.visible = true;
   const hot = wouldMatch(d, tx, ty, top);
-  ghost.material.forEach((m) => m.emissive.setHex(hot ? 0xa07818 : 0x2a9aa8));
-  tgtRing.material.color.setHex(hot ? 0xffc23a : 0x40e8ff);
+  ghost.material.forEach((m) => m.emissive.setHex(hot ? 0xa07818 : (slide ? 0x9a3a8a : 0x2a9aa8)));
+  tgtRing.material.color.setHex(hot ? 0xffc23a : (slide ? 0xff5ad8 : 0x40e8ff));
   tgtRing.position.set(wx(tx), 0.04, wx(ty)); tgtRing.visible = true; drag.top = top;
 }
 app.addEventListener('pointerdown', (e) => {
@@ -476,19 +524,21 @@ app.addEventListener('pointerdown', (e) => {
   try { app.setPointerCapture(e.pointerId); } catch (_) { }
   const t = pointerToTile(e.clientX, e.clientY);
   const die = t ? grid[t[1]][t[0]] : null;
-  drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, cx: e.clientX, cy: e.clientY, die, dir: null, blocked: false };
+  drag = { mode: null, t0: performance.now(), id: e.pointerId, x0: e.clientX, y0: e.clientY, cx: e.clientX, cy: e.clientY, die, dir: null, blocked: false };
   if (die) { selRing.position.set(wx(die.gx), 0.04, wx(die.gy)); selRing.visible = true; selRing.material.color.setHex(die.state === 'idle' ? 0xffffff : 0x884444); }
 }, { passive: false });
 app.addEventListener('pointermove', (e) => {
   if (!drag || e.pointerId !== drag.id) return;
-  e.preventDefault(); drag.cx = e.clientX; drag.cy = e.clientY; updateGhost();
+  e.preventDefault(); drag.cx = e.clientX; drag.cy = e.clientY;
+  if (!drag.mode && drag.die && Math.hypot(drag.cx - drag.x0, drag.cy - drag.y0) >= TILE_PX) drag.mode = 'roll';   // moved before the hold elapsed = roll
+  updateGhost();
 }, { passive: false });
 function endDrag(e, cancelled) {
   if (!drag || e.pointerId !== drag.id) return;
   drag.cx = e.clientX; drag.cy = e.clientY; if (!cancelled) updateGhost();
   const d = drag.die, dir = drag.dir, blocked = drag.blocked;
   if (!cancelled && d && dir) {
-    if (blocked || !tryRoll(d, dir)) { d.nudge = 1; sfx('buzz'); vib(15); }
+    if (blocked || !tryRoll(d, dir, drag.mode === 'slide')) { d.nudge = 1; sfx('buzz'); vib(15); }
   }
   cancelDrag();
 }
@@ -502,18 +552,29 @@ $('again').addEventListener('click', () => { audioInit(); resetGame(); });
 $('snd').addEventListener('click', () => { audioInit(); muted = !muted; $('snd').textContent = muted ? 'SND OFF' : 'SND ON'; });
 
 /* ---------- layout ---------- */
-let camBase = new THREE.Vector3(), camTarget = new THREE.Vector3(0, 0, 0);
+const camTarget = new THREE.Vector3(0, 0, 0), camBase = new THREE.Vector3();
+const VIEWS = { iso: { az: Math.PI / 4, tilt: THREE.MathUtils.degToRad(40), dist: 14 }, flat: { az: 0, tilt: THREE.MathUtils.degToRad(27), dist: 12 } };
+let view = 'iso'; try { view = localStorage.getItem('deadroll-view') === 'flat' ? 'flat' : 'iso'; } catch (e) { }
+const cam = { az: VIEWS[view].az, tilt: VIEWS[view].tilt, dist: 14 };
+function setView(v, instant) {
+  view = v; try { localStorage.setItem('deadroll-view', v); } catch (e) { }
+  $('view').textContent = v === 'iso' ? 'VIEW: ISO' : 'VIEW: FLAT';
+  if (instant) Object.assign(cam, VIEWS[v]);
+}
+$('view').addEventListener('click', () => { audioInit(); setView(view === 'iso' ? 'flat' : 'iso'); sfx('tick', 1.4); });
 function layout() {
   const r = app.getBoundingClientRect(); const W = Math.max(1, r.width), Ht = Math.max(1, r.height);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(W, Ht, false);
   const tw = TARGET_W, th = Math.round(TARGET_W * Ht / W);
   rt.setSize(tw, th); snapU.value.set(tw, th);
   camera.aspect = W / Ht; camera.fov = 38;
-  const vt = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), ht = vt * camera.aspect, tilt = THREE.MathUtils.degToRad(27);
-  const dW = (N + 1.5) / 2 / ht;                             // fit width (with margin for perspective)
-  const dH = (N * Math.cos(tilt) + 1.4) / (2 * vt * 0.62);   // fit lower ~2/3 of the screen
-  const dist = Math.max(dW, dH);
-  camBase.set(0, Math.cos(tilt) * dist, Math.sin(tilt) * dist);
+  const vt = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), ht = vt * camera.aspect;
+  for (const k of ['iso', 'flat']) {
+    const V = VIEWS[k], span = k === 'iso' ? N * Math.SQRT2 : N;                    // board width on screen (diamond vs square)
+    const dW = (span + 1.4) / 2 / ht;
+    const dH = (span * Math.cos(V.tilt) + 1.5) / (2 * vt * 0.64);                  // fit the lower ~2/3 of the screen
+    V.dist = Math.max(dW, dH);
+  }
   camera.setViewOffset(W, Ht, 0, -Ht * 0.15, W, Ht);          // push board down into the lower 2/3
   camera.near = 0.1; camera.far = 80; camera.updateProjectionMatrix();
 }
@@ -532,6 +593,7 @@ function update(rawDt) {
     elSpawn.style.width = Math.min(100, spawnT / spawnInterval() * 100) + '%';
   }
   let sinkingOrVanish = false;
+  for (const c of chains) c.t += dt;
   for (const d of [...dice]) {
     const m = d.mesh, px = wx(d.gx), pz = wx(d.gy);
     if (d.state === 'rising') {
@@ -542,10 +604,16 @@ function update(rawDt) {
       if (t >= 1) { d.state = 'idle'; d.bounce = 0; m.position.set(px, H, pz); sfx('tick', 0.7); evaluate(); }
     } else if (d.state === 'rolling') {
       d.t = Math.min(1, d.t + dt / ROLL_T);
-      const e = d.t * (0.35 + 0.65 * d.t), a = e * Math.PI / 2;
-      m.quaternion.setFromAxisAngle(d.axis, a).multiply(d.q0);
       const fx = wx(d.fromX), fz = wx(d.fromY);
-      m.position.set(fx + (px - fx) * e, H * (Math.cos(a) + Math.sin(a)), fz + (pz - fz) * e);
+      if (d.slide) {   // slide: glide one tile, top face untouched, die stays lifted then drops
+        const tt = d.t, e = tt * tt * (3 - 2 * tt), k = Math.min(1, Math.max(0, (tt - 0.55) / 0.45));
+        m.quaternion.copy(d.q0);
+        m.position.set(fx + (px - fx) * e, H + 0.22 * (1 - k * k * (3 - 2 * k)), fz + (pz - fz) * e);
+      } else {
+        const e = d.t * (0.35 + 0.65 * d.t), a = e * Math.PI / 2;
+        m.quaternion.setFromAxisAngle(d.axis, a).multiply(d.q0);
+        m.position.set(fx + (px - fx) * e, H * (Math.cos(a) + Math.sin(a)), fz + (pz - fz) * e);
+      }
       if (d.t >= 1) { snapQuat(m.quaternion); m.position.set(px, H, pz); landed(d); }
     } else if (d.state === 'idle') {
       d.bounce = Math.min(1, d.bounce + rawDt / 0.24);
@@ -553,42 +621,41 @@ function update(rawDt) {
       m.scale.set(1 + sq * 0.5, 1 - sq, 1 + sq * 0.5);
       m.position.set(px, H * (1 - sq) + 0.09 * Math.sin(Math.min(1, b * 1.6) * Math.PI) * (1 - b), pz);
       if (d.nudge > 0) { d.nudge = Math.max(0, d.nudge - rawDt * 5); m.position.x += Math.sin(d.nudge * 30) * 0.06 * d.nudge; }
-      const sel = drag && drag.die === d && drag.dir;
-      if (sel) m.position.y += 0.06;
+      const liftT = drag && drag.die === d ? (drag.mode === 'slide' ? 0.22 : (drag.dir ? 0.06 : 0)) : 0;
+      d.lift += (liftT - d.lift) * Math.min(1, rawDt * 14); m.position.y += d.lift;
       setGlow(d, 0, 0);
     } else if (d.state === 'sinking') {
       sinkingOrVanish = true;
-      d.sinkT += dt; const t = Math.min(1, d.sinkT / SINK_T);
-      const rate = 3 + 11 * t * t, phase = d.sinkT * rate * Math.PI * 2;
+      const c = d.chain, t = Math.min(1, c.t / c.dur);
+      d.shown += (t - d.shown) * Math.min(1, dt * 10);
+      const sh = d.shown, rate = 3 + 11 * t * t, phase = c.t * rate * Math.PI * 2;
       const pulse = 0.5 + 0.5 * Math.sin(phase);
       d.flash = Math.max(0, d.flash - rawDt * 3);
       setGlow(d, 0.35 + 0.65 * pulse, d.flash);
-      const y = H - ease.out(t) * 0 - (H + S * 0.55) * (t * t * 0.5 + t * 0.5);
+      const y = H - (H + S * 0.55) * (sh * sh * 0.5 + sh * 0.5);
       const jit = (0.006 + 0.03 * t) * (1 + Math.sin(phase * 3));
       m.position.set(px + Math.sin(phase * 1.7) * jit, y, pz + Math.cos(phase * 1.3) * jit);
       m.scale.set(1, 1, 1);
-      if (d.sinkT >= SINK_T) {
-        const pts = 10 * d.top * Math.max(1, combo);
-        score += pts; comboIdle = 0;
-        popup('+' + pts, new THREE.Vector3(px, 0.5, pz));
-        burst(px, 0.1, pz, 7, 0.6); sfx('pop', pitchFor(Math.min(combo, 8))); vib(22);
-        removeDie(d);
-      }
     } else if (d.state === 'vanishing') {
       sinkingOrVanish = true;
       d.delay -= dt;
       const pulse = 0.5 + 0.5 * Math.sin(simTime * 40);
       setGlow(d, pulse, 1);
       if (d.delay <= 0) {
-        const pts = 25 * Math.max(1, combo); score += pts; comboIdle = 0;
-        popup('+' + pts, new THREE.Vector3(px, 0.9, pz), 'big');
-        burst(px, H, pz, 12, 1); sfx('pop', pitchFor(d.pitchIdx)); vib(18);
+        const pts = d.chainPop ? 10 * d.top * Math.max(1, combo) : 25 * Math.max(1, combo); score += pts; comboIdle = 0;
+        popup('+' + pts, new THREE.Vector3(px, d.chainPop ? 0.5 : 0.9, pz), d.chainPop ? '' : 'big');
+        if (d.chainPop) { burst(px, 0.1, pz, 8, 0.6); vib(22); } else { burst(px, H, pz, 12, 1); vib(18); }
+        sfx('pop', pitchFor(d.chainPop ? Math.min(combo, 8) + d.pitchIdx : d.pitchIdx));
         removeDie(d);
       }
     }
   }
+  for (const c of [...chains]) if (c.t >= c.dur) {
+    chains.splice(chains.indexOf(c), 1);
+    dice.filter((x) => x.chain === c && x.state === 'sinking').forEach((x, i) => { x.state = 'vanishing'; x.chainPop = true; x.delay = i * 0.07; x.pitchIdx = i; });
+  }
   // combo decay
-  if (combo > 0) { if (sinkingOrVanish || dice.some((d) => d.state === 'sinking')) comboIdle = 0; else { comboIdle += dt; if (comboIdle > 1.4) setCombo(0); } }
+  if (combo > 0) { if (sinkingOrVanish || chains.length) comboIdle = 0; else { comboIdle += dt; if (comboIdle > 1.4) setCombo(0); } }
   // board-full check
   if (!gameOver && dice.length === N * N && dice.every((d) => d.state === 'idle')) endGame();
   // score count-up
@@ -603,6 +670,10 @@ function update(rawDt) {
   // selection ring pulse
   if (selRing.visible) { const s = 1 + 0.05 * Math.sin(simTime * 12); selRing.scale.set(s, s, s); }
   if (tgtRing.visible) { const s = 1 + 0.07 * Math.sin(simTime * 14); tgtRing.scale.set(s, s, s); }
+  if (drag && !drag.mode && drag.die && drag.die.state === 'idle' && !gameOver && performance.now() - drag.t0 >= HOLD_MS && Math.hypot(drag.cx - drag.x0, drag.cy - drag.y0) < TILE_PX) {
+    drag.mode = 'slide'; vib(12); sfx('tick', 1.8); selRing.material.color.setHex(0xff5ad8);
+  }
+  updateLabels();
   if (ghost.visible) ghost.position.y = H + 0.04 * Math.sin(simTime * 10);
   // world ambience
   for (const s of shards) { s.rotation.y += s.userData.spin * rawDt; s.rotation.x += s.userData.spin * 0.4 * rawDt; }
@@ -610,11 +681,15 @@ function update(rawDt) {
   glow.intensity = 5 + Math.sin(simTime * 1.6) * 1.2 + (sinkingOrVanish ? 4 : 0);
   // camera + shake
   shake = Math.max(0, shake - rawDt * 1.4);
+  const V = VIEWS[view], k = Math.min(1, rawDt * 7);
+  cam.az += (V.az - cam.az) * k; cam.tilt += (V.tilt - cam.tilt) * k; cam.dist += (V.dist - cam.dist) * k;
+  scene.fog.near = cam.dist + 5; scene.fog.far = cam.dist + 22;
+  camBase.set(Math.sin(cam.az) * Math.sin(cam.tilt) * cam.dist, Math.cos(cam.tilt) * cam.dist, Math.cos(cam.az) * Math.sin(cam.tilt) * cam.dist);
   camera.position.set(camBase.x + (Math.random() - .5) * shake * 0.4, camBase.y + (Math.random() - .5) * shake * 0.4, camBase.z);
   camera.lookAt(camTarget);
 }
 function setGlow(d, amt, white) {
-  const r = 1.0 * amt + white * 0.7, g = 0.32 * amt + white * 0.7, b = 0.08 * amt + white * 0.6;
+  const r = 0.17 + 1.0 * amt + white * 0.7, g = 0.14 + 0.32 * amt + white * 0.7, b = 0.1 + 0.08 * amt + white * 0.6;
   for (const m of d.mesh.material) m.emissive.setRGB(r, g, b);
 }
 
@@ -627,7 +702,7 @@ function frame(now) {
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
   requestAnimationFrame(frame);
 }
-layout(); resetGame();
+layout(); setView(view, true); resetGame();
 requestAnimationFrame(frame);
 
 /* ---------- debug / test hooks ---------- */
@@ -642,6 +717,11 @@ window.__game = {
   topAt(gx, gy) { const d = grid[gy][gx]; return d ? d.top : null; },
   stateAt(gx, gy) { const d = grid[gy][gx]; return d ? d.state : null; },
   evaluate,
+  get mode() { return drag ? drag.mode : null; },
+  get chains() { return chains.map((c) => ({ t: c.t, dur: c.dur, n: dice.filter((d) => d.chain === c).length })); },
+  get view() { return view; }, setView(v) { setView(v, true); },
+  dirFor(gx, gy, vx, vy) { const d = grid[gy][gx]; const k = dirFromDrag(d, vx, vy); return Object.keys(DIR4).find((n) => DIR4[n] === k); },
+  labelsVisible() { return Object.entries(labels).filter(([, l]) => l.visible).map(([k]) => k); },
   // place a die at (gx,gy) such that rolling it in dirName (N/S/E/W) yields resultTop
   placeFor(gx, gy, dirName, resultTop) {
     const dir = DIR4[dirName];
