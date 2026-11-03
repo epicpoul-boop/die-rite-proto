@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261103-200618">
+<meta name="build" content="20261103-212623">
 <title>DIE RITE – a dice sacrifice puzzle</title>
 <style>
   /* Press Start 2P (c) 2012 The Press Start 2P Project Authors, SIL Open Font License 1.1 — embedded below as base64 woff2 (latin subset). */
@@ -21,7 +21,6 @@
   .lbl{font-size:8px;line-height:8px;color:var(--dim);white-space:nowrap}
   #meterBox .lbl{display:flex;justify-content:space-between;align-items:baseline}
   #stage{font-weight:400;color:var(--gold);text-shadow:1px 1px 0 #000;transform-origin:100% 50%}
-  #callout{position:absolute;left:50%;top:27%;transform:translate3d(-50%,0,0);width:max-content;max-width:92%;box-sizing:border-box;padding:9px 12px 8px;text-align:center;font-size:8px;line-height:13px;color:#fff;opacity:0;pointer-events:none;z-index:24;will-change:transform,opacity}
   #rotHint{position:absolute;left:50%;bottom:calc(60px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:7px;font-size:7px;line-height:10px;color:#8f80c0;white-space:nowrap;pointer-events:none;opacity:.7;animation:rotpulse 2.4s ease-in-out infinite}
   #rotHint i{display:block;width:14px;height:14px}
   #rotHint.done{display:none}
@@ -29,15 +28,15 @@
   #helpBtn{display:none;position:absolute;left:50%;bottom:calc(82px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:26;padding:11px 14px 10px;min-height:44px;font-family:inherit;font-size:9px;line-height:12px;color:var(--gold);text-shadow:1px 1px 0 #000;white-space:nowrap;cursor:pointer;border:0;animation:helpblink .7s steps(1) infinite}
   @keyframes helpblink{50%{color:#fff;box-shadow:inset 3px 3px 0 #ffd24a,inset -3px -3px 0 #8a5a07,0 0 0 3px #000,0 6px 0 3px #000}}
   #helpBtn.down{transform:translateX(-50%) translateY(4px)}
-  #helpPanel{display:none;position:absolute;inset:0;z-index:45;align-items:center;justify-content:center;padding:0 20px;box-sizing:border-box;background:rgba(5,2,10,.7);pointer-events:auto}
-  #helpPanel.show{display:flex}
-  #helpBox{width:100%;max-width:340px;padding:16px 16px 18px;font-size:8px;line-height:13px;color:var(--ink)}
-  #helpBox h2{margin:0 0 12px;font-size:13px;line-height:16px;font-weight:400;color:var(--gold);text-align:center;text-shadow:2px 2px 0 #5a1a07}
-  #helpBox .k{display:block;color:var(--gold);margin:10px 0 3px}
-  #helpBox .k:first-child{margin-top:0}
-  #helpBox p{margin:0}
-  #helpBox .bigbtn{margin-top:16px;height:46px}
-  #callout i{display:block;font-style:normal;color:var(--gold);margin-bottom:3px}
+  #helpPanel{display:none;position:absolute;inset:0;z-index:45;background:transparent;pointer-events:auto}
+  #helpPanel.show{display:block}
+  #helpBox{position:absolute;left:8px;right:8px;padding:10px 12px 12px;font-size:8px;line-height:12px;color:var(--ink)}
+  #helpBox h2{margin:0 0 6px;font-size:10px;line-height:14px;font-weight:400;color:var(--gold);text-align:center;text-shadow:2px 2px 0 #5a1a07}
+  #helpBox p{margin:0 0 3px}
+  #helpBox b{font-weight:400;color:var(--gold)}
+  #helpBox .bigbtn{margin-top:8px;height:30px;font-size:10px}
+  #helpBox.tiny{font-size:7px;line-height:10px}
+  #app.helping #hint,#app.helping #rotHint{visibility:hidden}
   #toast.rite2{font-size:15px;line-height:20px;color:#ffd24a;text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 #6a3a08,5px 5px 0 #000}
 
   /* ---- PS1 panel: hard pixel bevel, scanlines + 4px dither ---- */
@@ -162,7 +161,7 @@
         <div id="comboBox" class="panel"><div class="lbl">CHANT</div><div id="combo" class="zero">x0</div></div>
       </div>
       <div class="row r2">
-        <div id="meterBox"><div class="lbl"><span>NEXT OFFERING</span><b id="stage">RITE I</b></div><div id="spawnbar"></div></div>
+        <div id="meterBox"><div class="lbl"><span>OFFERING</span><b id="stage">RITE I</b></div><div id="spawnbar"></div></div>
         <div id="btns">
           <button id="restart" class="ibtn" aria-label="Restart"><span class="ico" data-ico="reset"></span><span class="bl">RESET</span></button>
           <button id="view" class="ibtn" aria-label="Switch camera view"><span class="ico" data-ico="view"></span><span class="bl" id="viewLbl">FLAT</span></button>
@@ -171,7 +170,6 @@
       </div>
     </div>
     <div id="toast"></div>
-    <div id="callout" class="panel"></div>
     <div id="rotHint"><i id="rotL"></i><span>SWIPE HERE TO ROTATE</span><i id="rotR"></i></div>
     <button id="helpBtn" class="panel" aria-label="Help"></button>
     <div id="helpPanel"><div id="helpBox" class="panel"><h2 id="helpName"></h2><div id="helpText"></div><button id="helpOk" class="bigbtn">GOT IT</button></div></div>
@@ -1118,43 +1116,40 @@ function updateFade(rawDt) {
   if (f.phase === 0) { fadeU.value = Math.min(1, f.t / 0.2); if (f.t >= 0.2) { f.fn(); f.phase = 1; f.t = 0; } }
   else { fadeU.value = Math.max(0, 1 - f.t / 0.45); if (f.t >= 0.45) { fadeU.value = 0; boardFade = null; } }
 }
-const elStage = $('stage'), elCallout = $('callout');
+const elStage = $('stage');
 /* ---------- help buttons: each new twist offers a blinking 'NAME ?' button (about 22s) that opens a pausing help panel ---------- */
 const HELP = {
-  1: ['CHAINED', 'A die bound to the floor by iron chains.', 'It cannot be rolled or slid. It still counts as a normal die for matches, and when its group sinks the chains break and it is free.', 'Build a matching group right next to it to break it loose before the board fills up.'],
-  2: ['SLIME', 'A die coated in green slime.', 'It never rolls or turns. You can only slide it, and it keeps sliding until it hits a die, a wall, a pit edge or the board edge. Matches are checked where it stops.', 'Use a slimy die as a battering ram to land exactly next to the number you need.'],
-  3: ['PITS', 'Holes in the floor.', 'Dice cannot roll or slide into a pit, and new dice never appear on one. A full board means every tile without a pit is taken. Pits move to new places each rite.', 'Pits shrink your room: clear matches early and keep an escape lane open.'],
-  4: ['WALLS', 'Stone walls between tiles.', 'A wall blocks rolling and sliding across its edge, but dice on both sides of it still match each other.', 'Roll along a wall, not into it. A slime die stops dead against one.'],
-  5: ['THE MIX', 'The twists now arrive together.', 'Chained, slime, pits and walls all mix from here on. The hall turns to mossy temple stone as the rite deepens.', 'Stay calm and keep dice moving. The sacrifice of single pips still clears the board.'],
-  8: ['FASTER', 'The rite quickens.', 'The hall darkens to basalt. Offerings arrive faster and more twisted dice appear at once.', 'Match early and often. A waiting board is a full board.']
+  1: ['CHAINED', 'Bound to the floor by iron chains.', 'It cannot be rolled or slid, but it still matches. When its group sinks, the chains break.', 'Match next to it to free it early.'],
+  2: ['SLIME', 'A die coated in green slime.', 'It never rolls, it only slides - and keeps sliding until it hits a die, wall, pit or the edge.', 'Slide it next to the number you need.'],
+  3: ['PITS', 'Holes in the floor.', 'Dice cannot enter and nothing spawns on them. They move each rite. Full = every other tile taken.', 'Clear matches early: pits shrink your room.'],
+  4: ['WALLS', 'Stone walls between tiles.', 'Walls block rolls and slides across their edge. Dice on both sides still match.', 'Roll along a wall, not into it.'],
+  5: ['THE MIX', 'The twists now come together.', 'Chains, slime, pits and walls all mix from here. The hall turns to mossy temple stone.', 'Stay calm. Single-pip sacrifices still clear.'],
+  8: ['FASTER', 'The rite quickens.', 'The hall darkens to basalt. Offerings come faster and more twisted dice appear.', 'Match early and often.']
 };
 const elHelpBtn = $('helpBtn'), elHelpPanel = $('helpPanel'); let helpFor = 0, helpT = 0, helpOpen = false;
 function hideHelp() { helpFor = 0; helpT = 0; elHelpBtn.style.display = 'none'; }
-function closeHelp() { helpOpen = false; elHelpPanel.classList.remove('show'); hideHelp(); }
+function closeHelp() { helpOpen = false; elHelpPanel.classList.remove('show'); app.classList.remove('helping'); hideHelp(); }
 function offerHelp(n) { if (!HELP[n]) return; helpFor = n; helpT = 23; elHelpBtn.textContent = HELP[n][0] + ' ?'; elHelpBtn.style.display = 'block'; }
 function openHelp() {
   if (!helpFor) return; const h = HELP[helpFor]; cancelDrag(); helpOpen = true; elHelpBtn.style.display = 'none';
   $('helpName').textContent = h[0];
-  $('helpText').innerHTML = `<span class="k">WHAT IT IS</span><p>${h[1].toUpperCase()}</p><span class="k">HOW IT WORKS</span><p>${h[2].toUpperCase()}</p><span class="k">TIP</span><p>${h[3].toUpperCase()}</p>`;
-  elHelpPanel.classList.add('show');
+  $('helpText').innerHTML = `<p><b>IS</b> ${h[1].toUpperCase()}</p><p><b>HOW</b> ${h[2].toUpperCase()}</p><p><b>TIP</b> ${h[3].toUpperCase()}</p>`;
+  app.classList.add('helping'); elHelpPanel.classList.add('show');
+  /* a compact sheet in the free band above or below the board (whichever is taller): the board is never covered */
+  camera.updateMatrixWorld(); const R = N / 2 + 0.3; let bt = 1e9;
+  for (const [x, z] of [[-R, -R], [R, -R], [R, R], [-R, R]]) bt = Math.min(bt, projScreen(x, 1.0, z).y);
+  const hudB = $('spawnbar').getBoundingClientRect().bottom - appRect.top, topFrom = hudB + 10, topTo = bt - 8, botFrom = stripTop() + 4, botTo = appRect.height - 10;
+  const box = $('helpBox'), useTop = topTo - topFrom > botTo - botFrom + 4, from = useTop ? topFrom : botFrom, to = useTop ? topTo : botTo;
+  box.classList.remove('tiny'); box.style.top = box.style.bottom = 'auto';
+  if (box.offsetHeight > to - from) box.classList.add('tiny');
+  if (useTop) box.style.top = Math.round(from + Math.max(0, (to - from - box.offsetHeight) / 2)) + 'px'; else box.style.bottom = Math.round(appRect.height - to + Math.max(0, (to - from - box.offsetHeight) / 2)) + 'px';
 }
 function updateHelp(rawDt) { if (helpFor && !helpOpen) { helpT -= rawDt; if (helpT <= 0) hideHelp(); } }
 for (const el of [elHelpBtn, elHelpPanel]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
 elHelpBtn.addEventListener('click', openHelp); $('helpOk').addEventListener('click', closeHelp);
 const stageLabel = () => 'RITE ' + roman(stage + 1);
-function showCallout(title, lines) {
-  elCallout.innerHTML = `<i>${title}</i>${lines.join('<br>')}`;
-  elCallout.animate([{ opacity: 0, transform: 'translate3d(-50%,10px,0)' }, { opacity: 1, transform: 'translate3d(-50%,0,0)', offset: 0.08 }, { opacity: 1, transform: 'translate3d(-50%,0,0)', offset: 0.9 }, { opacity: 0, transform: 'translate3d(-50%,-6px,0)' }], { duration: 6000, easing: 'ease-out' });
-}
-const ANNOUNCE = { 1: ['THE CHAINED ARRIVE', 'CHAINED DICE', ['BOUND IN IRON - THEY CANNOT MOVE.', 'MATCH THEM TO BREAK THEIR CHAINS.']],
-  2: ['THE SLIME SPREADS', 'SLIME DICE', ['THEY NEVER ROLL, ONLY SLIDE -', 'AND SLIDE UNTIL THEY HIT SOMETHING.']],
-  3: ['THE FLOOR OPENS', 'PITS', ['PITS SWALLOW THE FLOOR.', 'NO DIE MAY ENTER - THEY SHIFT EACH RITE.']],
-  4: ['THE WALLS RISE', 'WALLS', ['WALLS BLOCK ROLLS AND SLIDES', 'ACROSS THEIR EDGE.']],
-  5: ['THE TEMPLE AWAKENS', 'THE TWISTS MIX', ['THE GREY STONE TURNS TO MOSS AND ROOT.', 'EVERY TWIST NOW WALKS TOGETHER.']],
-  8: ['THE TEMPLE DARKENS', 'THE RITE QUICKENS', ['MOSS BURNS AWAY - BASALT RISES.', 'CHAINS, SLIME, PITS AND WALLS AT ONCE.', 'THE OFFERINGS COME FASTER.']] };
-function announceStage(n) {
-  const a = ANNOUNCE[n] || (n - 4 >= L_MAX ? ['THE RITE IS AT ITS PEAK', 'RITE ' + roman(n + 1), ['THE PITS AND WALLS SHIFT AGAIN.', 'HOLD THE LINE.']] : ['THE RITE DEEPENS', 'RITE ' + roman(n + 1), ['MORE CHAINS, MORE SLIME, MORE PITS AND WALLS.', 'THE OFFERINGS GROW BOLDER.']]);
-  toast(a[0], 'rite2'); showCallout(a[1], a[2]); defer(() => sfx('chant')); vib([30, 40, 60]); shake = Math.max(shake, 0.2);
+function announceStage(n) {                       // no toast, no explainer: just the blinking help button + sound + haptic
+  defer(() => sfx('chant')); vib([30, 40, 60]); shake = Math.max(shake, 0.2);
   offerHelp(n); breatherT = BREATHER; forceKind = n === 1 ? 'chained' : n === 2 ? 'slime' : null; spawnT = 0;
   elStage.animate([{ transform: 'scale(1.9)', color: '#fff' }, { transform: 'scale(1)' }], { duration: 500, easing: 'ease-out' });
 }
@@ -1491,7 +1486,7 @@ function layout() {
   const vt = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), ht = vt * camera.aspect;
   /* Fit: solve the camera distance so the board's left/right extremes land at ±FIT of the screen width
      (perspective-correct, from the real projection), then shift vertically so the whole board sits below the HUD and above the bottom edge. */
-  const tc = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.1, 80), R = N / 2 + 0.3, FIT = 0.96, FIT_ISO = 0.974;   // iso: tiles reach 97.4% of the half-width, the corner pillars/candles land just outside the screen
+  const tc = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.1, 80), R = N / 2 + 0.3, FIT = 0.96, FIT_ISO = 0.997;   // iso: tiles reach 99.7% of the half-width, the corner pillars/candles land just outside the screen
   const rimC = [[-R, 0.12, -R], [R, 0.12, -R], [R, 0.12, R], [-R, 0.12, R]].map((a) => new THREE.Vector3(...a));
   const topC = rimC.map((c) => c.clone().setY(1.0)), botC = rimC.map((c) => c.clone().setY(-2.4));
   const TH = N / 2, tileC = [-TH, TH].flatMap((x) => [-TH, TH].flatMap((z) => [0, 0.9].map((y) => new THREE.Vector3(x, y, z))));   // playable-area corners (floor + die-top height)
