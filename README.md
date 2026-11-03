@@ -31,5 +31,12 @@ Bone dice (`?dice=classic` for the old ones, `?pipglow=1` makes only the pips gl
 
 Caps: chained <=6, slime <=5, pits <=5, walls <=8, spawn interval >=1.5s. Hall changes are an in-place morph (a wave of tiles swapping, dice/pits/walls untouched). Debug: `?stage=N`, plus `__game.setStage / addStageTime / setTerrain / place(gx,gy,top,kind)` hooks. Tests: `test.py` (core) and `test_endless.py URL VW VH [shots]` (endless rules).
 
+## Views, rotation, help
+- Iso view is zoomed so the playable tiles nearly touch the side edges and the corner pillars/candles fall just off-screen; flat view unchanged.
+- A horizontal swipe that starts in the bottom strip (below the board) rotates the camera 90 degrees in the swipe direction (250ms, eased) in both views. Dice swipes are matched on screen, so they follow the view. `__game.rotate(+1|-1)`, `__game.rotQ`.
+- Each new twist offers a blinking `NAME ?` button (~23s) that opens a help panel and pauses the game.
+- Chained dice are drawn with real chains from the die's upper corners to iron staples in the tile-corner gaps; they break away when the die sinks.
+- The sacrifice dim/flush and the stage fade are softened (about half as strong, shorter).
+
 ## Board drafts
 `?board=a|b|c` pins one hall for the whole run (and disables the hall change).

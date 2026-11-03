@@ -64,7 +64,8 @@ async def main():
             await swipe(page,(0,0),(-1,0)) if False else None
             # edge: swipe left from (0,0) -> screen left of tile
             pa = await page.evaluate('__game.tileToScreen(0,0)')
-            await page.mouse.move(pa['x'],pa['y']); await page.mouse.down(); await page.mouse.move(pa['x']-40,pa['y'],steps=5); await page.mouse.up(); await page.wait_for_timeout(400)
+            po = await page.evaluate('__game.tileToScreen(-1,0)')          # screen position of the off-board neighbour (iso: not simply 'left')
+            await page.mouse.move(pa['x'],pa['y']); await page.mouse.down(); await page.mouse.move(pa['x']+(po['x']-pa['x'])*0.8,pa['y']+(po['y']-pa['y'])*0.8,steps=5); await page.mouse.up(); await page.wait_for_timeout(400)
             check(f'[{VIEW}] cannot roll off board', await page.evaluate('__game.topAt(0,0)') == 5)
             # 4) matching: two 2s -> sinking
             await page.evaluate('__game.clear()')
@@ -104,10 +105,15 @@ async def main():
 
             await page.wait_for_timeout(900)
             e = await page.evaluate('__game.boardExtents()')
-            EXP = {('iso',390):(298,667),('flat',390):(292,673),('iso',360):(290,631),('flat',360):(284,637)}
+            EXP = {('flat',390):(292,673),('flat',360):(284,637)}
             ex = EXP.get((VIEW,VW))
             if ex: check(f'[{VIEW}] {VW}x{VH} board position unchanged vs previous build', abs(e['minY']-ex[0])<=1.5 and abs(e['maxY']-ex[1])<=1.5, f"{e['minY']:.0f}..{e['maxY']:.0f} expected {ex}")
-            check(f'[{VIEW}] {VW}x{VH} board edges ~touch screen edges (2% margin)', e['minX']/e['W']<0.045 and e['minX']>=0 and e['maxX']<=e['W'] and 1-e['maxX']/e['W']<0.045, f"x {e['minX']:.1f}..{e['maxX']:.1f} of {e['W']:.0f}")
+            if VIEW == 'flat':
+                check(f'[{VIEW}] {VW}x{VH} board edges ~touch screen edges (2% margin)', e['minX']/e['W']<0.045 and e['minX']>=0 and e['maxX']<=e['W'] and 1-e['maxX']/e['W']<0.045, f"x {e['minX']:.1f}..{e['maxX']:.1f} of {e['W']:.0f}")
+            else:
+                te = await page.evaluate('__game.tileExtents()')
+                check(f'[iso] {VW}x{VH} playable tiles fully on screen, just inside the edges', te['minX']>=2 and te['maxX']<=te['W']-2 and te['minX']/te['W']<0.03 and 1-te['maxX']/te['W']<0.03, f"tiles x {te['minX']:.1f}..{te['maxX']:.1f} of {te['W']:.0f}")
+                check(f'[iso] {VW}x{VH} border corners/candles fall just outside both edges', e['minX']<0 and e['maxX']>e['W'] and -e['minX']<0.06*e['W'] and e['maxX']-e['W']<0.06*e['W'], f"rim x {e['minX']:.1f}..{e['maxX']:.1f}")
             check(f'[{VIEW}] {VW}x{VH} board bottom on-screen & below HUD', e['maxY']<=e['H'] and e['minY']>=e['hudBottom']-6, f"y {e['minY']:.0f}..{e['maxY']:.0f} of {e['H']:.0f}, hud {e['hudBottom']:.0f}")
             await page.screenshot(path=f'screenshot_fit_{VIEW}_{VW}x{VH}.png')
             # slide mode: hold ~250ms then drag = move without flipping

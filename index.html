@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261103-183541">
+<meta name="build" content="20261103-200618">
 <title>DIE RITE – a dice sacrifice puzzle</title>
 <style>
   /* Press Start 2P (c) 2012 The Press Start 2P Project Authors, SIL Open Font License 1.1 — embedded below as base64 woff2 (latin subset). */
@@ -22,6 +22,21 @@
   #meterBox .lbl{display:flex;justify-content:space-between;align-items:baseline}
   #stage{font-weight:400;color:var(--gold);text-shadow:1px 1px 0 #000;transform-origin:100% 50%}
   #callout{position:absolute;left:50%;top:27%;transform:translate3d(-50%,0,0);width:max-content;max-width:92%;box-sizing:border-box;padding:9px 12px 8px;text-align:center;font-size:8px;line-height:13px;color:#fff;opacity:0;pointer-events:none;z-index:24;will-change:transform,opacity}
+  #rotHint{position:absolute;left:50%;bottom:calc(60px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:7px;font-size:7px;line-height:10px;color:#8f80c0;white-space:nowrap;pointer-events:none;opacity:.7;animation:rotpulse 2.4s ease-in-out infinite}
+  #rotHint i{display:block;width:14px;height:14px}
+  #rotHint.done{display:none}
+  @keyframes rotpulse{50%{opacity:.32}}
+  #helpBtn{display:none;position:absolute;left:50%;bottom:calc(82px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:26;padding:11px 14px 10px;min-height:44px;font-family:inherit;font-size:9px;line-height:12px;color:var(--gold);text-shadow:1px 1px 0 #000;white-space:nowrap;cursor:pointer;border:0;animation:helpblink .7s steps(1) infinite}
+  @keyframes helpblink{50%{color:#fff;box-shadow:inset 3px 3px 0 #ffd24a,inset -3px -3px 0 #8a5a07,0 0 0 3px #000,0 6px 0 3px #000}}
+  #helpBtn.down{transform:translateX(-50%) translateY(4px)}
+  #helpPanel{display:none;position:absolute;inset:0;z-index:45;align-items:center;justify-content:center;padding:0 20px;box-sizing:border-box;background:rgba(5,2,10,.7);pointer-events:auto}
+  #helpPanel.show{display:flex}
+  #helpBox{width:100%;max-width:340px;padding:16px 16px 18px;font-size:8px;line-height:13px;color:var(--ink)}
+  #helpBox h2{margin:0 0 12px;font-size:13px;line-height:16px;font-weight:400;color:var(--gold);text-align:center;text-shadow:2px 2px 0 #5a1a07}
+  #helpBox .k{display:block;color:var(--gold);margin:10px 0 3px}
+  #helpBox .k:first-child{margin-top:0}
+  #helpBox p{margin:0}
+  #helpBox .bigbtn{margin-top:16px;height:46px}
   #callout i{display:block;font-style:normal;color:var(--gold);margin-bottom:3px}
   #toast.rite2{font-size:15px;line-height:20px;color:#ffd24a;text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 #6a3a08,5px 5px 0 #000}
 
@@ -157,6 +172,9 @@
     </div>
     <div id="toast"></div>
     <div id="callout" class="panel"></div>
+    <div id="rotHint"><i id="rotL"></i><span>SWIPE HERE TO ROTATE</span><i id="rotR"></i></div>
+    <button id="helpBtn" class="panel" aria-label="Help"></button>
+    <div id="helpPanel"><div id="helpBox" class="panel"><h2 id="helpName"></h2><div id="helpText"></div><button id="helpOk" class="bigbtn">GOT IT</button></div></div>
     <div id="hint" class="panel" style="opacity:0"><span id="hint1">SWIPE TO ROLL · HOLD + DRAG TO SLIDE</span></div>
     <div id="flash"></div>
     <div id="over"><div id="confetti"></div>
@@ -241,9 +259,9 @@ const postMat = new THREE.ShaderMaterial({
       c=floor(c*63.+bayer(floor(p))*0.55+0.5)/63.;                              // 6-bit colour, gentler dither
       float v=length(vUv-0.5);
       c*=1.0-0.55*smoothstep(0.35,0.85,v);
-      c=mix(c, c*vec3(1.35,.55,.6)*(1.-.5*uRite), uRite);                       // the rite: board darkens and blushes red
-      c*=1.-.35*uRite*smoothstep(.2,.8,v);
-      c*=1.-uFade;                                                              // hall / terrain transition: quick dip to black
+      c=mix(c, c*vec3(1.16,.76,.8)*(1.-.22*uRite), uRite);                     // the rite: a gentle dim and a rosy flush
+      c*=1.-.16*uRite*smoothstep(.2,.8,v);
+      c*=1.-.6*uFade;                                                            // hall / terrain transition: quick dip to black
       gl_FragColor=vec4(c,1.);
     }`,
   depthTest: false, depthWrite: false
@@ -712,14 +730,9 @@ function boneAtlas() {
   const LIFT = PIPGLOW ? 1.08 : 1, col = (r, gg, b, d = 0) => `rgb(${Math.max(0, Math.min(255, (r + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (gg + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (b + d) * LIFT)) | 0})`;
   mg.fillStyle = '#000'; mg.fillRect(0, 0, 384, 192);
   const disc = (ctx, cx, cy, r, fill) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill(); };
-  const chainBand = () => {                                       // iron chain links hugging all four face edges + rivets: pips stay clear
-    g.fillStyle = 'rgba(14,14,22,.6)'; g.fillRect(0, 0, 64, 9); g.fillRect(0, 55, 64, 9); g.fillRect(0, 0, 9, 64); g.fillRect(55, 0, 9, 64);
-    const link = (x, y, w, h, hor) => { g.lineWidth = 2; g.strokeStyle = '#1a1c24'; g.beginPath(); g.ellipse(x, y, w / 2 + 1, h / 2 + 1, 0, 0, 6.2832); g.stroke();
-      g.lineWidth = 1.6; g.strokeStyle = hor ? '#a4aabc' : '#6a7084'; g.beginPath(); g.ellipse(x, y, w / 2, h / 2, 0, 0, 6.2832); g.stroke();
-      g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(x - w / 2 + 1, y - h / 2 + 1, 2, 1); };
-    for (let t = 4; t < 64; t += 7) { const hor = ((t - 4) / 7) % 2 === 0; link(t, 4.5, hor ? 9 : 5, hor ? 5.5 : 7, hor); link(t, 59.5, hor ? 9 : 5, hor ? 5.5 : 7, hor); link(4.5, t, hor ? 5.5 : 7, hor ? 9 : 5, hor); link(59.5, t, hor ? 5.5 : 7, hor ? 9 : 5, hor); }
-    for (const [x, y] of [[4, 4], [60, 4], [4, 60], [60, 60]]) { disc(g, x, y, 4.2, '#15161e'); disc(g, x, y, 3.2, '#7a8094'); disc(g, x - 1, y - 1, 1.2, '#dfe4f2'); }
-    for (let k = 0; k < 26; k++) { g.fillStyle = 'rgba(120,70,36,.55)'; g.fillRect(R() * 64 | 0, R() < .5 ? (R() * 8 | 0) : 56 + (R() * 8 | 0), 1, 1); }       // rust
+  const chainBand = () => {                                       // iron corner clamps (where the chains bolt on) + a little rust: pips stay clear
+    for (const [x, y] of [[7, 7], [57, 7], [7, 57], [57, 57]]) { g.fillStyle = '#15161e'; g.fillRect(x - 7, y - 7, 14, 14); g.fillStyle = '#6a7084'; g.fillRect(x - 6, y - 6, 12, 12); g.fillStyle = '#9aa0b4'; g.fillRect(x - 6, y - 6, 12, 2); g.fillRect(x - 6, y - 6, 2, 12); disc(g, x, y, 2.6, '#15161e'); disc(g, x - .5, y - .5, 1.4, '#dfe4f2'); }
+    for (let k = 0; k < 26; k++) { g.fillStyle = 'rgba(120,70,36,.5)'; g.fillRect(R() * 64 | 0, R() * 64 | 0, 1, 1); }       // rust specks
   };
   const slimeCoat = () => {                                        // sickly green coating: translucent wash, drips from the top edge, glossy glints
     g.fillStyle = 'rgba(70,150,36,.46)'; g.fillRect(0, 0, 64, 64);
@@ -803,6 +816,49 @@ function slideDest(d, dir) { let x = d.gx, y = d.gy, n = 0; while (canStep(x, y,
 const playableCount = () => { let n = 0; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!terrain.pit[y][x]) n++; return n; };
 const wx = (gx) => gx - (N - 1) / 2;
 
+/* ---------- chained dice: real chains, die corner -> iron staple in the gap between tiles (one shared geometry, one extra draw call per chained die) ---------- */
+const ironTex = (() => { const c = mkCanvas(4, 1), g = c.getContext('2d'); ['#8c92a8', '#474c60', '#4e3524', '#1c1d26'].forEach((f, i) => { g.fillStyle = f; g.fillRect(i, 0, 1, 1); }); return nearest(new THREE.CanvasTexture(c)); })();
+const chainMat = psx(new THREE.MeshLambertMaterial({ map: ironTex })); chainMat.emissive = new THREE.Color(0x15161e);
+const chainGeos = {};
+function chainGeoFor(gx, gy) {                                           // each chain runs from a die's upper corner down along a gap line to the iron staple at a tile-corner gap, one tile further out (or inward at the board edge)
+  const T = THREE, modes = [];
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { const inb = (x, y) => x >= 0 && y >= 0 && x < N && y < N; modes.push(inb(gx, gy + sz) ? 0 : inb(gx + sx, gy) ? 1 : 2); }
+  const key = modes.join(''); if (chainGeos[key]) return chainGeos[key];
+  const pos = [], nor = [], uv = [];
+  const box = (c, bx, by, bz, sx, sy, sz, tex) => { const g = new T.BoxGeometry(sx, sy, sz).toNonIndexed(); g.applyMatrix4(new T.Matrix4().makeBasis(bx, by, bz).setPosition(c.x, c.y, c.z));
+    const p = g.attributes.position.array, n = g.attributes.normal.array; for (let i = 0; i < p.length; i += 3) { pos.push(p[i], p[i + 1], p[i + 2]); nor.push(n[i], n[i + 1], n[i + 2]); uv.push((tex + 0.5) / 4, 0.5); } };
+  const X = new T.Vector3(1, 0, 0), Y = new T.Vector3(0, 1, 0), Z = new T.Vector3(0, 0, 1);
+  [[1, 1], [-1, 1], [1, -1], [-1, -1]].forEach(([sx, sz], ci) => {
+    const A = new T.Vector3(sx * 0.46, 0.78, sz * 0.46), m = modes[ci];
+    const B = m === 0 ? new T.Vector3(sx * 0.5, 0.06, sz * 1.5) : m === 1 ? new T.Vector3(sx * 1.5, 0.06, sz * 0.5) : new T.Vector3(sx * 0.5, 0.06, -sz * 1.5);
+    const dir = B.clone().sub(A), L = dir.length(); dir.normalize();
+    const s2 = new T.Vector3().crossVectors(Math.abs(dir.y) < 0.9 ? Y : X, dir).normalize(), w = new T.Vector3().crossVectors(dir, s2).normalize(), n = Math.floor(L / 0.092);
+    for (let i = 0; i < n; i++) { const c = A.clone().addScaledVector(dir, (i + 0.5) / n * L); if (i % 2) box(c, w, s2, dir, 0.07, 0.04, 0.125, 1); else box(c, s2, w, dir, 0.07, 0.04, 0.125, 0); }
+    box(A, X, Y, Z, 0.11, 0.11, 0.11, 3);                                 // eye bolt at the die corner
+    box(new T.Vector3(B.x, 0.016, B.z), X, Y, Z, 0.26, 0.04, 0.26, 2);    // anchor plate over the gap crossing
+    box(new T.Vector3(B.x - 0.065, 0.1, B.z), X, Y, Z, 0.04, 0.12, 0.04, 0); box(new T.Vector3(B.x + 0.065, 0.1, B.z), X, Y, Z, 0.04, 0.12, 0.04, 0); box(new T.Vector3(B.x, 0.165, B.z), X, Y, Z, 0.17, 0.045, 0.045, 0);   // staple arch
+  });
+  const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new T.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+  return (chainGeos[key] = g);
+}
+const chainPool = [], chainDebris = [];
+function attachChains(d) {
+  const m = chainPool.pop() || (() => { const q = new THREE.Mesh(chainGeoFor(d.gx, d.gy), chainMat); q.frustumCulled = false; return q; })(); m.geometry = chainGeoFor(d.gx, d.gy);
+  m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1); m.position.set(wx(d.gx), 0, wx(d.gy)); m.visible = false; scene.add(m); d.chainMesh = m;
+}
+function releaseChains(d, fall) {
+  const m = d.chainMesh; if (!m) return; d.chainMesh = null;
+  if (fall && m.visible) chainDebris.push({ m, t: 0, vy: 1.3 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 0.8, vz: (Math.random() - 0.5) * 0.8, sx: (Math.random() - 0.5) * 6, sz: (Math.random() - 0.5) * 6 });
+  else { scene.remove(m); chainPool.push(m); }
+}
+function updateChains(dt) {
+  for (const d of dice) { const m = d.chainMesh; if (m) { m.visible = d.state !== 'rising'; m.position.x = d.mesh.position.x; m.position.z = d.mesh.position.z; } }
+  for (let i = chainDebris.length - 1; i >= 0; i--) {                     // the broken chains fly off, drop and shrink away
+    const q = chainDebris[i]; q.t += dt; const m = q.m, k = q.t / 0.7;
+    m.position.x += q.vx * dt; m.position.z += q.vz * dt; m.position.y = q.vy * q.t - 5.5 * q.t * q.t; m.rotation.x += q.sx * dt; m.rotation.z += q.sz * dt; m.scale.setScalar(Math.max(0.01, 1 - Math.max(0, k - 0.45) / 0.55));
+    if (k >= 1) { scene.remove(m); chainPool.push(m); chainDebris.splice(i, 1); }
+  }
+}
 const diePool = []; let dieSeq = 0;      // finished dice are recycled (no material/geometry churn, no shader program release)
 function makeDie(gx, gy, q, delay, kind = 'normal') {
   let mesh = diePool.pop();
@@ -812,13 +868,13 @@ function makeDie(gx, gy, q, delay, kind = 'normal') {
   mesh.position.set(wx(gx), -S, wx(gy));
   scene.add(mesh);
   const d = { kind, slimeDir: null, id: ++dieSeq, gr: -1, gg: -1, gb: -1, lift: 0, slide: false, chain: null, shown: 0, pts: 0, chainPop: false, mesh, gx, gy, top: topOf(q), state: 'rising', t: -(delay || 0) / RISE_T, bounce: 1, nudge: 0, sinkT: 0, delay: 0, flash: 0, pitchIdx: 0 };
-  mesh.userData.die = d;
+  mesh.userData.die = d; if (kind === 'chained') attachChains(d);
   grid[gy][gx] = d; dice.push(d);
   return d;
 }
 function removeDie(d) {
   if (grid[d.gy][d.gx] === d) grid[d.gy][d.gx] = null;
-  scene.remove(d.mesh); d.mesh.userData.die = null; diePool.push(d.mesh);
+  releaseChains(d, false); scene.remove(d.mesh); d.mesh.userData.die = null; diePool.push(d.mesh);
   dice.splice(dice.indexOf(d), 1);
 }
 const DIR4 = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
@@ -854,7 +910,7 @@ function igniteSigil(gx, gy, delay) {
 function updateRite(dt) {
   if (riteT >= 0) {                          // board darkening / reddening is one shader uniform: free
     riteT += dt; const t = riteT;
-    riteU.value = t < 0.14 ? t / 0.14 : Math.max(0, 1 - (t - 0.14) / 1.5); if (t > 1.7) { riteT = -1; riteU.value = 0; }
+    const k = t < 0.22 ? t / 0.22 : Math.max(0, 1 - (t - 0.22) / 0.95); riteU.value = k * k * (3 - 2 * k); if (t > 1.2) { riteT = -1; riteU.value = 0; }   // softer: smooth in/out, ~1.2s instead of 1.7s
   }
   for (let i = 0; i < SIG_N; i++) {
     const sg = sigils[i]; if (!sg.on) continue;
@@ -1063,6 +1119,28 @@ function updateFade(rawDt) {
   else { fadeU.value = Math.max(0, 1 - f.t / 0.45); if (f.t >= 0.45) { fadeU.value = 0; boardFade = null; } }
 }
 const elStage = $('stage'), elCallout = $('callout');
+/* ---------- help buttons: each new twist offers a blinking 'NAME ?' button (about 22s) that opens a pausing help panel ---------- */
+const HELP = {
+  1: ['CHAINED', 'A die bound to the floor by iron chains.', 'It cannot be rolled or slid. It still counts as a normal die for matches, and when its group sinks the chains break and it is free.', 'Build a matching group right next to it to break it loose before the board fills up.'],
+  2: ['SLIME', 'A die coated in green slime.', 'It never rolls or turns. You can only slide it, and it keeps sliding until it hits a die, a wall, a pit edge or the board edge. Matches are checked where it stops.', 'Use a slimy die as a battering ram to land exactly next to the number you need.'],
+  3: ['PITS', 'Holes in the floor.', 'Dice cannot roll or slide into a pit, and new dice never appear on one. A full board means every tile without a pit is taken. Pits move to new places each rite.', 'Pits shrink your room: clear matches early and keep an escape lane open.'],
+  4: ['WALLS', 'Stone walls between tiles.', 'A wall blocks rolling and sliding across its edge, but dice on both sides of it still match each other.', 'Roll along a wall, not into it. A slime die stops dead against one.'],
+  5: ['THE MIX', 'The twists now arrive together.', 'Chained, slime, pits and walls all mix from here on. The hall turns to mossy temple stone as the rite deepens.', 'Stay calm and keep dice moving. The sacrifice of single pips still clears the board.'],
+  8: ['FASTER', 'The rite quickens.', 'The hall darkens to basalt. Offerings arrive faster and more twisted dice appear at once.', 'Match early and often. A waiting board is a full board.']
+};
+const elHelpBtn = $('helpBtn'), elHelpPanel = $('helpPanel'); let helpFor = 0, helpT = 0, helpOpen = false;
+function hideHelp() { helpFor = 0; helpT = 0; elHelpBtn.style.display = 'none'; }
+function closeHelp() { helpOpen = false; elHelpPanel.classList.remove('show'); hideHelp(); }
+function offerHelp(n) { if (!HELP[n]) return; helpFor = n; helpT = 23; elHelpBtn.textContent = HELP[n][0] + ' ?'; elHelpBtn.style.display = 'block'; }
+function openHelp() {
+  if (!helpFor) return; const h = HELP[helpFor]; cancelDrag(); helpOpen = true; elHelpBtn.style.display = 'none';
+  $('helpName').textContent = h[0];
+  $('helpText').innerHTML = `<span class="k">WHAT IT IS</span><p>${h[1].toUpperCase()}</p><span class="k">HOW IT WORKS</span><p>${h[2].toUpperCase()}</p><span class="k">TIP</span><p>${h[3].toUpperCase()}</p>`;
+  elHelpPanel.classList.add('show');
+}
+function updateHelp(rawDt) { if (helpFor && !helpOpen) { helpT -= rawDt; if (helpT <= 0) hideHelp(); } }
+for (const el of [elHelpBtn, elHelpPanel]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
+elHelpBtn.addEventListener('click', openHelp); $('helpOk').addEventListener('click', closeHelp);
 const stageLabel = () => 'RITE ' + roman(stage + 1);
 function showCallout(title, lines) {
   elCallout.innerHTML = `<i>${title}</i>${lines.join('<br>')}`;
@@ -1077,7 +1155,7 @@ const ANNOUNCE = { 1: ['THE CHAINED ARRIVE', 'CHAINED DICE', ['BOUND IN IRON - T
 function announceStage(n) {
   const a = ANNOUNCE[n] || (n - 4 >= L_MAX ? ['THE RITE IS AT ITS PEAK', 'RITE ' + roman(n + 1), ['THE PITS AND WALLS SHIFT AGAIN.', 'HOLD THE LINE.']] : ['THE RITE DEEPENS', 'RITE ' + roman(n + 1), ['MORE CHAINS, MORE SLIME, MORE PITS AND WALLS.', 'THE OFFERINGS GROW BOLDER.']]);
   toast(a[0], 'rite2'); showCallout(a[1], a[2]); defer(() => sfx('chant')); vib([30, 40, 60]); shake = Math.max(shake, 0.2);
-  breatherT = BREATHER; forceKind = n === 1 ? 'chained' : n === 2 ? 'slime' : null; spawnT = 0;
+  offerHelp(n); breatherT = BREATHER; forceKind = n === 1 ? 'chained' : n === 2 ? 'slime' : null; spawnT = 0;
   elStage.animate([{ transform: 'scale(1.9)', color: '#fff' }, { transform: 'scale(1)' }], { duration: 500, easing: 'ease-out' });
 }
 function setStage(n, announce) {
@@ -1099,7 +1177,7 @@ function pickKind() {
   if (r >= pC && r < pC + pS && ns < Math.min(5, 2 + (c.L >> 1))) return 'slime';
   return 'normal';
 }
-function breakChains(d) { if (d.kind !== 'chained') return; d.kind = 'normal'; d.mesh.geometry = dieGeos.normal; burst(d.mesh.position.x, H, d.mesh.position.z, 6, 0.8); defer(() => sfx('clack', 1.9)); }
+function breakChains(d) { if (d.kind !== 'chained') return; d.kind = 'normal'; d.mesh.geometry = dieGeos.normal; releaseChains(d, true); burst(d.mesh.position.x, H, d.mesh.position.z, 6, 0.8); defer(() => sfx('clack', 1.9)); }
 const SPAWN_FAST = 0.83;      // 17% faster than the previous pacing (was max(2.6, 5.1-0.04n))
 const spawnInterval = () => { const c = cfg(), base = Math.max(2.6 * SPAWN_FAST, (5.1 - spawnCount * 0.04) * SPAWN_FAST); return Math.max(1.5, base * (1 - 0.05 * c.L) * (c.quick ? 0.9 : 1)) * (breatherT > 0 ? 1.7 : 1); };   // late game: up to ~37% faster, never under 1.5s; breather: 70% slower
 const emptyTiles = () => { const r = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x] && !terrain.pit[y][x]) r.push([x, y]); return r; };
@@ -1118,7 +1196,7 @@ function resetGame() {
   chains = [];
   clearParticles();
   for (const el of popEls) { if (el._a) el._a.cancel(); el.style.opacity = 0; }
-  score = 0; shownScore = 0; breatherT = 0; forceKind = null; if (boardFade) { boardFade.fn(); boardFade = null; fadeU.value = 0; } finishMorph(); setStage(startStage, false); spawnT = 0; spawnCount = 0; gameOver = false; freezeT = 0; shake = 0; comboIdle = 0; runStartBest = best;
+  score = 0; shownScore = 0; breatherT = 0; forceKind = null; if (boardFade) { boardFade.fn(); boardFade = null; fadeU.value = 0; } finishMorph(); closeHelp(); setStage(startStage, false); spawnT = 0; spawnCount = 0; gameOver = false; freezeT = 0; shake = 0; comboIdle = 0; runStartBest = best;
   setCombo(0); $('over').classList.remove('show'); $('confetti').innerHTML = ''; renderScore(false); setMeter(0);
   cancelDrag();
   for (let i = 0; i < 7; i++) spawnDie(i * 0.12);
@@ -1297,10 +1375,29 @@ function updateGhost() {
   tgtRing.material.color.setHex(hot ? 0xffc23a : (slide ? 0xff5ad8 : 0x40e8ff));
   tgtRing.position.set(wx(tx), 0.04, wx(ty)); tgtRing.visible = true; drag.top = top;
 }
+/* Board rotation: a horizontal swipe that STARTS in the bottom strip (below the board) turns the camera 90 degrees in the swipe direction.
+   Dice gestures are untouched: they start on the board, and swipe directions are matched on screen (dirFromDrag), so they follow the view automatically. */
+let rotDrag = null;
+function stripTop() {
+  camera.updateMatrixWorld(); const R = N / 2 + 0.3; let m = 0;
+  for (const [x, z] of [[-R, -R], [R, -R], [R, R], [-R, R]]) m = Math.max(m, projScreen(x, 0.12, z).y);
+  return m + 6;
+}
+function rotateBoard(dir) {
+  if (rotT >= 0 || gameOver) return false; cancelDrag();
+  rotQ += dir; rotFrom = camRot; rotTo = camRot + dir * Math.PI / 2; rotT = 0; sfx('tick', 0.8); vib(8);
+  try { localStorage.setItem('dierite-rot', '1'); } catch (e) { } elRotHint.classList.add('done');
+  return true;
+}
+const ARROW = ['....#...', '....##..', '#######.', '########', '#######.', '....##..', '....#...', '........'];
+const arrowSvg = (flip) => { let d = ''; ARROW.forEach((row, y) => [...row].forEach((c, x) => { if (c === '#') d += `M${flip ? 7 - x : x} ${y}h1v1h-1z`; })); return `<svg viewBox="0 0 8 8" width="14" height="14" shape-rendering="crispEdges"><path fill="currentColor" d="${d}"/></svg>`; };
+$('rotL').innerHTML = arrowSvg(true); $('rotR').innerHTML = arrowSvg(false);
+const elRotHint = $('rotHint'); try { if (localStorage.getItem('dierite-rot')) elRotHint.classList.add('done'); } catch (e) { }
 app.addEventListener('pointerdown', (e) => {
   if (e.target.closest && e.target.closest('button, #title, #over')) return;
   audioInit();
-  if (drag || gameOver) return;
+  if (drag || rotDrag || gameOver) return;
+  if (started && !helpOpen && e.clientY - appRect.top > stripTop()) { e.preventDefault(); try { app.setPointerCapture(e.pointerId); } catch (_) { } rotDrag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, done: false }; return; }
   e.preventDefault();
   try { app.setPointerCapture(e.pointerId); } catch (_) { }
   const t = pointerToTile(e.clientX, e.clientY);
@@ -1309,6 +1406,7 @@ app.addEventListener('pointerdown', (e) => {
   if (die) { selRing.position.set(wx(die.gx), 0.04, wx(die.gy)); selRing.visible = true; selRing.material.color.setHex(die.state === 'idle' ? 0xffffff : 0x884444); }
 }, { passive: false });
 app.addEventListener('pointermove', (e) => {
+  if (rotDrag && e.pointerId === rotDrag.id) { const dx = e.clientX - rotDrag.x0, dy = e.clientY - rotDrag.y0; if (!rotDrag.done && Math.abs(dx) > 34 && Math.abs(dx) > Math.abs(dy) * 1.3) { rotDrag.done = true; rotateBoard(dx > 0 ? 1 : -1); } return; }
   if (!drag || e.pointerId !== drag.id) return;
   e.preventDefault(); drag.cx = e.clientX; drag.cy = e.clientY;
   if (!drag.mode && drag.die && Math.hypot(drag.cx - drag.x0, drag.cy - drag.y0) >= TILE_PX) drag.mode = 'roll';   // moved before the hold elapsed = roll
@@ -1323,8 +1421,8 @@ function endDrag(e, cancelled) {
   }
   cancelDrag();
 }
-app.addEventListener('pointerup', (e) => endDrag(e, false));
-app.addEventListener('pointercancel', (e) => endDrag(e, true));
+app.addEventListener('pointerup', (e) => { if (rotDrag && e.pointerId === rotDrag.id) rotDrag = null; endDrag(e, false); });
+app.addEventListener('pointercancel', (e) => { if (rotDrag && e.pointerId === rotDrag.id) rotDrag = null; endDrag(e, true); });
 for (const ev of ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu']) document.addEventListener(ev, (e) => e.preventDefault());
 document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 document.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
@@ -1370,6 +1468,7 @@ window.addEventListener('keydown', (e) => { if (!started && (e.key === 'Enter' |
 const camTarget = new THREE.Vector3(0, 0, 0), camBase = new THREE.Vector3();
 const VIEWS = { iso: { az: Math.PI / 4, tilt: THREE.MathUtils.degToRad(40), dist: 14, shift: 100 }, flat: { az: 0, tilt: THREE.MathUtils.degToRad(27), dist: 12, shift: 100 } };
 let view = 'flat'; try { view = localStorage.getItem('dierite-view2') === 'iso' ? 'iso' : 'flat'; } catch (e) { }   // flat is the default; only an explicit user toggle is saved
+let camRot = 0, rotFrom = 0, rotTo = 0, rotT = -1, rotQ = 0; const ROT_T = 0.25;
 const cam = { az: VIEWS[view].az, tilt: VIEWS[view].tilt, dist: 14, shift: 0 };
 const VIEWS_H = { W: 390, Ht: 844 };
 let lastShift = null;
@@ -1392,20 +1491,21 @@ function layout() {
   const vt = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), ht = vt * camera.aspect;
   /* Fit: solve the camera distance so the board's left/right extremes land at ±FIT of the screen width
      (perspective-correct, from the real projection), then shift vertically so the whole board sits below the HUD and above the bottom edge. */
-  const tc = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.1, 80), R = N / 2 + 0.3, FIT = 0.96;
+  const tc = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.1, 80), R = N / 2 + 0.3, FIT = 0.96, FIT_ISO = 0.974;   // iso: tiles reach 97.4% of the half-width, the corner pillars/candles land just outside the screen
   const rimC = [[-R, 0.12, -R], [R, 0.12, -R], [R, 0.12, R], [-R, 0.12, R]].map((a) => new THREE.Vector3(...a));
   const topC = rimC.map((c) => c.clone().setY(1.0)), botC = rimC.map((c) => c.clone().setY(-2.4));
+  const TH = N / 2, tileC = [-TH, TH].flatMap((x) => [-TH, TH].flatMap((z) => [0, 0.9].map((y) => new THREE.Vector3(x, y, z))));   // playable-area corners (floor + die-top height)
   const place = (V, dist) => { tc.position.set(Math.sin(V.az) * Math.sin(V.tilt) * dist, Math.cos(V.tilt) * dist, Math.cos(V.az) * Math.sin(V.tilt) * dist); tc.lookAt(0, 0, 0); tc.updateMatrixWorld(true); tc.updateProjectionMatrix(); };
   const safeTop = $('safe').getBoundingClientRect().height, bandTop = 147 + safeTop, bandBot = Ht - 26;   // fixed band: independent of HUD styling
   for (const k of ['iso', 'flat']) {
     const V = VIEWS[k]; let lo = 3, hi = 70;
     for (let i = 0; i < 40; i++) {
       const mid = (lo + hi) / 2; place(V, mid);
-      const mx = Math.max(...rimC.map((c) => Math.abs(c.clone().project(tc).x)));
-      if (mx > FIT) lo = mid; else hi = mid;
+      const mx = Math.max(...(k === 'iso' ? tileC : rimC).map((c) => Math.abs(c.clone().project(tc).x)));
+      if (mx > (k === 'iso' ? FIT_ISO : FIT)) lo = mid; else hi = mid;
     }
     V.dist = (lo + hi) / 2; place(V, V.dist);
-    const ys = [...topC, ...rimC, ...botC].map((c) => (-c.clone().project(tc).y * 0.5 + 0.5) * Ht);
+    const ys = (k === 'iso' ? [...topC, ...rimC] : [...topC, ...rimC, ...botC]).map((c) => (-c.clone().project(tc).y * 0.5 + 0.5) * Ht);
     const pyTop = Math.min(...ys), pyBot = Math.max(...ys);
     V.shift = pyBot - pyTop <= bandBot - bandTop ? (bandTop + bandBot) / 2 - (pyTop + pyBot) / 2 : bandBot - pyBot;
   }
@@ -1432,7 +1532,7 @@ function update(rawDt) {
     const due = stage < 5 ? (stageT >= STAGE_DUR || score >= STAGE_SCORE[stage]) : (stageT >= LATE_DUR || score - stageScore0 >= LATE_SCORE);
     if (due && !boardFade) setStage(stage + 1, true);
   }
-  updateFade(rawDt); updateMorph(rawDt);
+  updateFade(rawDt); updateMorph(rawDt); updateChains(rawDt); updateHelp(rawDt);
   let sinkingOrVanish = false;
   for (let i = 0; i < chains.length; i++) chains[i].t += dt;
   tmpDice.length = 0; for (let i = 0; i < dice.length; i++) tmpDice.push(dice[i]);
@@ -1542,9 +1642,10 @@ function update(rawDt) {
   // camera + shake
   shake = Math.max(0, shake - rawDt * 1.4);
   const V = VIEWS[view], k = Math.min(1, rawDt * 7), shk = fxLevel > 0 ? 0 : shake;
+  if (rotT >= 0) { rotT += rawDt; const u = Math.min(1, rotT / ROT_T); camRot = rotFrom + (rotTo - rotFrom) * (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2); if (u >= 1) { camRot = rotTo; rotT = -1; } }
   cam.az += (V.az - cam.az) * k; cam.tilt += (V.tilt - cam.tilt) * k; cam.dist += (V.dist - cam.dist) * k; cam.shift += (V.shift - cam.shift) * k; applyShift(false);
   scene.fog.near = cam.dist + 5; scene.fog.far = cam.dist + 22;
-  camBase.set(Math.sin(cam.az) * Math.sin(cam.tilt) * cam.dist, Math.cos(cam.tilt) * cam.dist, Math.cos(cam.az) * Math.sin(cam.tilt) * cam.dist);
+  const az = cam.az + camRot; camBase.set(Math.sin(az) * Math.sin(cam.tilt) * cam.dist, Math.cos(cam.tilt) * cam.dist, Math.cos(az) * Math.sin(cam.tilt) * cam.dist);
   camera.position.set(camBase.x + (Math.random() - .5) * shk * 0.4, camBase.y + (Math.random() - .5) * shk * 0.4, camBase.z);
   camera.lookAt(camTarget);
 }
@@ -1580,7 +1681,7 @@ function frame(now) {
   if (perfEl) { perfN++; perfMax = Math.max(perfMax, rawMs); if (now - perfT > 500) { perfEl.textContent = `${Math.round(perfN * 1000 / (now - perfT))}fps worst ${Math.round(perfMax)}ms calls ${perf.calls} fx ${fxLevel} dpr ${renderer.getPixelRatio()}`; perfN = 0; perfMax = 0; perfT = now; } }
   const t0 = performance.now();
   renderer.info.reset();
-  update(dt);
+  update(helpOpen ? 0 : dt);                       // the help panel pauses the game
   renderer.setRenderTarget(rt); renderer.render(scene, camera);
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
   const c = performance.now() - t0; perf.cpu[perf.n++ % 300] = c; if (c > perf.maxCpu) perf.maxCpu = c;
@@ -1610,7 +1711,7 @@ window.__game = {
   setStage(n, announce = true) { setStage(n, announce); }, addStageTime(sec) { stageT += sec; }, get playable() { return playableCount(); },
   get terrain() { const pits = [], walls = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (terrain.pit[y][x]) pits.push([x, y]); if (terrain.wallE[y][x]) walls.push([x, y, 'e']); if (terrain.wallS[y][x]) walls.push([x, y, 's']); } return { pits, walls }; },
   setTerrain(pits, walls) { const t = { pit: mkFlags(), wallE: mkFlags(), wallS: mkFlags() }; for (const [x, y] of pits || []) t.pit[y][x] = true; for (const [x, y, k] of walls || []) (k === 'e' ? t.wallE : t.wallS)[y][x] = true; applyTerrain(t, boardInfo ? boardInfo.V : hallFor(stage)); },
-  kindAt(gx, gy) { const d = grid[gy][gx]; return d ? d.kind : null; }, forceSpawn(kind) { forceKind = kind || null; return !!spawnDie(0); }, get breather() { return breatherT; }, get morphing() { return !!morph; }, get hall() { return boardInfo && boardInfo.V; },
+  kindAt(gx, gy) { const d = grid[gy][gx]; return d ? d.kind : null; }, forceSpawn(kind) { forceKind = kind || null; return !!spawnDie(0); }, get breather() { return breatherT; }, get helpOpen() { return helpOpen; }, get helpFor() { return helpFor; }, get helpT() { return helpT; }, skipHelpTime(s) { helpT -= s; }, get chainMeshes() { return dice.filter((d) => d.chainMesh).length; }, get chainDebris() { return chainDebris.length; }, get morphing() { return !!morph; }, get hall() { return boardInfo && boardInfo.V; },
   get boardVar() { return boardVar; }, get boardInfo() { return boardInfo && { tris: boardInfo.tris, gtris: boardInfo.gtris }; },
   get riteDark() { return riteU.value; }, get sigilsLive() { return sigils.filter((q) => q.on).length; }, get res() { return [resU.value.x, resU.value.y]; },
   get score() { return score; }, get combo() { return combo; }, get over() { return gameOver; }, get spawnCount() { return spawnCount; },
@@ -1621,6 +1722,14 @@ window.__game = {
   topAt(gx, gy) { const d = grid[gy][gx]; return d ? d.top : null; },
   stateAt(gx, gy) { const d = grid[gy][gx]; return d ? d.state : null; },
   evaluate,
+  get ghostInfo() { return { v: ghost.visible, x: ghost.position.x, z: ghost.position.z }; }, get labelInfo() { const o = {}; for (const k in labels) o[k] = labels[k].visible ? [labels[k].position.x, labels[k].position.z] : null; return o; },
+  rotate(dir) { return rotateBoard(dir); }, get rotQ() { return rotQ; }, get rotating() { return rotT >= 0; }, get stripTop() { return stripTop(); }, get camRot() { return camRot; },
+  tileExtents() {
+    camera.updateMatrixWorld(); const r = app.getBoundingClientRect(), TH = N / 2, pts = [];
+    for (const x of [-TH, TH]) for (const z of [-TH, TH]) for (const y of [0, 0.9]) pts.push(new THREE.Vector3(x, y, z).project(camera));
+    const xs = pts.map((p) => (p.x * .5 + .5) * r.width), ys = pts.map((p) => (-p.y * .5 + .5) * r.height);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys), W: r.width, H: r.height };
+  },
   boardExtents() {
     camera.updateMatrixWorld(); const R = N / 2 + 0.3, r = app.getBoundingClientRect();
     const pts = []; for (const y of [1.0, 0.12, -2.4]) for (const [x, z] of [[-R, -R], [R, -R], [R, R], [-R, R]]) pts.push(new THREE.Vector3(x, y, z).project(camera));

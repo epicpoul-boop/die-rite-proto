@@ -76,6 +76,49 @@ async def main():
             for x, y, t, k in [(0,0,6,'normal'),(1,0,6,'chained'),(3,1,4,'chained'),(2,2,3,'normal'),(5,3,1,'chained'),(1,4,5,'normal'),(4,4,2,'chained'),(3,5,6,'normal')]: await G(f'__game.place({x},{y},{t},"{k}")')
             await page.wait_for_timeout(1200); await page.screenshot(path='endless_chained.png')
 
+        # ---- chained look: real chains to floor anchors, cheap, break away
+        await fresh(page); await G('__game.setStage(1,false)'); pgm = await G('__game.perf.programs')
+        for x, y, t_, k in [(2,2,4,"chained"),(3,2,4,"normal"),(1,4,3,"chained"),(5,5,1,"chained"),(0,0,2,"chained")]: await G(f'__game.place({x},{y},{t_},"{k}")')
+        await page.wait_for_timeout(600)
+        check('every chained die has its chain mesh (corner dice too)', await G('__game.chainMeshes') == 4, str(await G('__game.chainMeshes')))
+        pf = await G('({c:__game.perf.calls, p:__game.perf.programs})')
+        check('chains: one extra call per chained die, no new shader programs', pf['c'] <= 20 and pf['p'] == pgm, str(pf) + f' prog0={pgm}')
+        await G('__game.place(2,3,4,"normal")'); await G('__game.place(2,1,4,"normal")'); await G('__game.evaluate()'); await page.wait_for_timeout(250)
+        check('chains break away (debris) when the die sinks', await G('__game.chainDebris') >= 1 and await G('__game.chainMeshes') == 3, str(await G('({d:__game.chainDebris,m:__game.chainMeshes})')))
+        await page.wait_for_timeout(1200)
+        check('broken chains are recycled', await G('__game.chainDebris') == 0)
+        await G('__game.clear()'); check('clearing the board frees all chains', await G('__game.chainMeshes') == 0)
+        if SHOTS:
+            await G('__game.setStage(1,true)')
+            for x, y, t_, k in [(1,1,6,'chained'),(3,1,4,'normal'),(2,3,3,'chained'),(4,3,5,'normal'),(0,4,2,'chained'),(5,5,1,'chained'),(3,4,6,'normal')]: await G(f'__game.place({x},{y},{t_},"{k}")')
+            await page.wait_for_timeout(1500); await page.screenshot(path='chained_new.png')
+
+        # ---- help buttons
+        await fresh(page); await G('__game.freezeSpawns(false)'); await G('__game.setStage(2,true)'); await page.wait_for_timeout(500)
+        bb = await G('(()=>{const r=document.getElementById("helpBtn").getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,t:document.getElementById("helpBtn").textContent,d:getComputedStyle(document.getElementById("helpBtn")).display,hud:document.getElementById("spawnbar").getBoundingClientRect().bottom,hint:document.getElementById("hint").getBoundingClientRect().top}})()')
+        ext = await G('__game.boardExtents()')
+        check('help button shows "SLIME ?" when slime arrives', bb['d'] != 'none' and bb['t'] == 'SLIME ?', str(bb))
+        check('help button clear of HUD, board and hint; tappable size', bb['y'] > ext['maxY'] + 4 and bb['y'] > bb['hud'] and bb['y'] + bb['h'] < bb['hint'] and bb['h'] >= 40 and bb['x'] >= 0 and bb['x'] + bb['w'] <= VW, f"btn y={bb['y']:.0f}-{bb['y']+bb['h']:.0f} board maxY={ext['maxY']:.0f} hint={bb['hint']:.0f}")
+        if SHOTS:
+            for x, y, t_, k in [(1,1,5,'slime'),(3,2,2,'normal'),(4,4,6,'chained'),(2,4,3,'normal'),(0,3,4,'normal')]: await G(f'__game.place({x},{y},{t_},"{k}")')
+            await page.wait_for_timeout(500); await page.screenshot(path='help_button.png')
+        n0 = await G('__game.dice.length'); st0 = (await G('__game.stageInfo'))['stageT']
+        await page.click('#helpBtn'); await page.wait_for_timeout(300)
+        ht_ = await page.inner_text('#helpText')
+        check('tap opens the help panel with what/how/tip', await G('__game.helpOpen') and await page.is_visible('#helpPanel') and all(k in ht_ for k in ['WHAT IT IS', 'HOW IT WORKS', 'TIP']) and 'SLIME' in await page.inner_text('#helpName'))
+        if SHOTS: await page.screenshot(path='help_panel.png')
+        await page.wait_for_timeout(6000)
+        n1 = await G('__game.dice.length'); st1 = (await G('__game.stageInfo'))['stageT']
+        check('game is paused while the panel is open (no spawns, clock stopped)', n1 == n0 and abs(st1 - st0) < 0.5, f'{n0}->{n1} stageT {st0:.1f}->{st1:.1f}')
+        await page.click('#helpOk'); await page.wait_for_timeout(300)
+        check('closing resumes the game and removes the button', not await G('__game.helpOpen') and not await page.is_visible('#helpPanel') and not await page.is_visible('#helpBtn') and await G('__game.helpFor') == 0)
+        await G('__game.setStage(3,true)'); await page.wait_for_timeout(300); check('PITS button appears for the next twist', await page.inner_text('#helpBtn') == 'PITS ?')
+        await G('__game.skipHelpTime(10)'); await page.wait_for_timeout(200); check('button still there after ~10s', await page.is_visible('#helpBtn'))
+        await G('__game.skipHelpTime(15)'); await page.wait_for_timeout(300); check('button disappears by itself after ~23s', not await page.is_visible('#helpBtn'))
+        await G('__game.setStage(4,true)'); await G('__game.setStage(5,true)'); await page.wait_for_timeout(300)
+        check('a newer twist replaces the old button', await page.inner_text('#helpBtn') == 'THE MIX ?')
+        await G('__game.freezeSpawns(true)')
+
         # ---- slime
         await fresh(page); await G('__game.setStage(2,false)')
         await G('__game.place(0,3,3,"slime")'); await swipe(page, (0,3), (1,3))
@@ -137,6 +180,60 @@ async def main():
                 if (x, y) in pits: continue
                 await G(f'__game.place({x},{y},{[6,3,5,2,4,1][i%6]},"{["normal","normal","chained","slime"][i%4]}")'); i += 1
             await page.wait_for_timeout(1500); await page.screenshot(path='endless_pits_walls.png')
+
+        # ---- board rotation (bottom strip) + screen-relative controls, flat and iso
+        for vw in ['flat', 'iso']:
+            await fresh(page)
+            if vw == 'iso': await page.click('#view'); await page.wait_for_timeout(1500)
+            st = await G('__game.stripTop'); ext = await G('__game.boardExtents()')
+            check(f'[{vw}] rotate strip starts below the board and above the screen bottom', st >= ext['maxY'] - 80 and st < VH - 60, f"strip from y={st:.0f}, board bottom {ext['maxY']:.0f}")
+            ys = st + 22
+            async def strip_swipe(x0, x1):
+                await page.mouse.move(x0, ys); await page.mouse.down()
+                for i in range(1, 7): await page.mouse.move(x0 + (x1 - x0) * i / 6, ys + 2)
+                await page.mouse.up()
+            # board-area swipe never rotates; strip swipe never rolls dice
+            await G('__game.place(2,5,3)')
+            pa = await G('__game.tileToScreen(0,0)'); await page.mouse.move(pa['x'] - 10, pa['y']); await page.mouse.down(); await page.mouse.move(pa['x'] + 150, pa['y'], steps=6); await page.mouse.up(); await page.wait_for_timeout(500)
+            check(f'[{vw}] horizontal swipe on the board does not rotate', await G('__game.rotQ') == 0 and await G('__game.camRot') == 0)
+            await strip_swipe(60, 330); await page.wait_for_timeout(120)
+            mid = await G('({r:__game.rotating,c:__game.camRot})'); await page.wait_for_timeout(450)
+            fin = await G('({r:__game.rotating,c:__game.camRot,q:__game.rotQ})')
+            check(f'[{vw}] strip swipe right turns the camera +90deg, smoothly (~250ms)', mid['r'] and 0 < mid['c'] < 1.5707 and not fin['r'] and abs(fin['c'] - 1.5708) < 0.01 and fin['q'] == 1, f'{mid} {fin}')
+            check(f'[{vw}] strip swipe does not move a die above it', await G('__game.topAt(2,5)') == 3 and await G('__game.stateAt(2,5)') == 'idle')
+            await strip_swipe(330, 60); await page.wait_for_timeout(500)
+            check(f'[{vw}] strip swipe left turns back (-90deg)', await G('__game.rotQ') == 0 and abs(await G('__game.camRot')) < 0.01)
+            await G('__game.clear()')
+            # screen-relative controls after every rotation
+            for q in [1, 2, 3, 4]:
+                await strip_swipe(60, 330); await page.wait_for_timeout(500)
+                await G('__game.clear()'); await G('__game.place(2,2,3)')
+                if vw == 'flat':
+                    pdie = await G('__game.tileToScreen(2,2)')
+                    away = {1: (-1, 0), 2: (0, 1), 3: (1, 0), 0: (0, -1)}[q % 4]       # camera at +x/-z/-x/+z: "up" = away from the viewer
+                    await page.mouse.move(pdie['x'], pdie['y']); await page.mouse.down(); await page.mouse.move(pdie['x'], pdie['y'] - 70, steps=6)
+                    gi = await G('__game.ghostInfo'); lab = await G('__game.labelInfo')
+                    await page.mouse.up(); await page.wait_for_timeout(700)
+                    tgt = (2 + away[0], 2 + away[1])
+                    check(f'[flat] after {q*90}deg: swipe UP moves the die away from the viewer', await G(f'__game.topAt({tgt[0]},{tgt[1]})') is not None and await G('__game.topAt(2,2)') is None, f'expected {tgt}')
+                    check(f'[flat] after {q*90}deg: ghost preview + direction label on the same neighbour', gi['v'] and abs(gi['x'] - (tgt[0] - 2.5)) < 0.01 and abs(gi['z'] - (tgt[1] - 2.5)) < 0.01 and lab and any(v and abs(v[0] - (tgt[0] - 2.5)) < 0.01 and abs(v[1] - (tgt[1] - 2.5)) < 0.01 for v in lab.values()), f'{gi}')
+                else:
+                    for nb in [(1,0), (-1,0), (0,1), (0,-1)]:
+                        await G('__game.clear()'); await G('__game.place(2,2,3)')
+                        pa = await G('__game.tileToScreen(2,2)'); pb = await G(f'__game.tileToScreen({2+nb[0]},{2+nb[1]})')
+                        await page.mouse.move(pa['x'], pa['y']); await page.mouse.down()
+                        for i in range(1, 7): await page.mouse.move(pa['x'] + (pb['x'] - pa['x']) * i / 6, pa['y'] + (pb['y'] - pa['y']) * i / 6)
+                        await page.mouse.up(); await page.wait_for_timeout(600)
+                        if await G(f'__game.topAt({2+nb[0]},{2+nb[1]})') is None: check(f'[iso] after {q*90}deg: swipe toward {nb} follows the view', False); break
+                    else: check(f'[iso] after {q*90}deg: swipes toward each neighbour follow the view', True)
+            if SHOTS and vw == 'flat':
+                await G('__game.clear()')
+                for x, y, t_, k in [(0,0,6,'normal'),(2,1,3,'chained'),(4,2,4,'normal'),(1,3,5,'slime'),(3,4,2,'normal'),(5,5,1,'normal')]: await G(f'__game.place({x},{y},{t_},"{k}")')
+                await strip_swipe(60, 330); await page.wait_for_timeout(110); await page.screenshot(path='rotated_mid.png'); await page.wait_for_timeout(500); await page.screenshot(path='rotated.png')
+            if SHOTS and vw == 'iso':
+                await G('__game.clear()')
+                for x, y, t_, k in [(0,0,6,'normal'),(2,1,3,'chained'),(4,2,4,'normal'),(1,3,5,'slime'),(3,4,2,'normal'),(5,5,1,'normal')]: await G(f'__game.place({x},{y},{t_},"{k}")')
+                await page.wait_for_timeout(600); await page.screenshot(path='iso_zoom.png')
 
         # ---- in-place morph A -> C (dice, pits and walls preserved), then C -> B
         await fresh(page); await G('__game.setStage(4,false)')
@@ -203,7 +300,7 @@ async def main():
         # ---- perf
         pf = await G('({calls:__game.perf.calls, programs:__game.perf.programs})')
         check('draw calls stay low with a full late board', pf['calls'] <= 45, str(pf))
-        ext = await G('__game.boardExtents()'); check('board stays on screen', ext['minX'] >= 0 and ext['maxX'] <= ext['W'], str(ext))
+        ext = await G('__game.tileExtents()'); check('playable tiles stay on screen', ext['minX'] >= 0 and ext['maxX'] <= ext['W'], str(ext))
         check('no console errors/warnings', not errors, '; '.join(errors)[:300])
         await b.close()
     bad = [r for r in results if not r[1]]; print(f'\n{len(results)-len(bad)}/{len(results)} passed'); sys.exit(1 if bad else 0)
