@@ -594,14 +594,90 @@ const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xa070f
 const FACE_NRM = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].map((a) => new THREE.Vector3(...a));
 /* One draw call per die: all six faces live in a single 192x32 atlas; the box UVs are remapped per face. */
 const FACE_VAL = [3, 4, 1, 6, 2, 5];
-const dieGeo = new THREE.BoxGeometry(S, S, S);
-dieGeo.clearGroups();
-{
+
+/* ---------- BONE dice (draft: ?dice=bone, optional &pipglow=1) ----------
+   Same single-draw-call die: one mesh, one 384x64 atlas (six 64px faces). The cube has real rounded edges (2-segment arcs, smooth normals).
+   Pips are carved dark discs; the single pip on the 1 face is a plain round blood-red dot. */
+const BONE = params.get('dice') === 'bone', PIPGLOW = BONE && params.has('pipglow');
+const EM0 = PIPGLOW ? [0, 0, 0] : BONE ? [0.035, 0.03, 0.025] : [0.17, 0.14, 0.1];      // resting emissive: with pip-glow the body is NOT tinted, only pips light up
+function roundedDieGeo(Ssz, b) {
+  const h = Ssz / 2, hb = h - b, T = THREE, V3 = (a) => new T.Vector3(...a);
+  const FR = [[[0, 0, -1], [0, 1, 0], [1, 0, 0]], [[0, 0, 1], [0, 1, 0], [-1, 0, 0]], [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[1, 0, 0], [0, 0, 1], [0, -1, 0]], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]].map((f) => f.map(V3));
+  const pos = [], nor = [], uvs = [], CW = 64, AW = 384;
+  const uvFor = (f, P) => { const fr = FR[f], cu = Math.min(1, Math.max(0, P.dot(fr[0]) / Ssz + .5)), cv = Math.min(1, Math.max(0, P.dot(fr[1]) / Ssz + .5)); return [(f * CW + 0.5 + cu * (CW - 1)) / AW, (0.5 + cv * (CW - 1)) / CW]; };
+  const tri = (f, P0, N0, P1, N1, P2, N2) => {
+    const e1 = P1.clone().sub(P0), e2 = P2.clone().sub(P0), nn = e1.cross(e2), avg = N0.clone().add(N1).add(N2);
+    if (nn.dot(avg) < 0) { [P1, P2] = [P2, P1]; [N1, N2] = [N2, N1]; }
+    for (const [P, N] of [[P0, N0], [P1, N1], [P2, N2]]) { pos.push(P.x, P.y, P.z); nor.push(N.x, N.y, N.z); uvs.push(...uvFor(f, P)); }
+  };
+  const quad = (f, a, na, bq, nb, c, nc, d, nd) => { tri(f, a, na, bq, nb, c, nc); tri(f, a, na, c, nc, d, nd); };
+  for (let f = 0; f < 6; f++) {                                  // flat faces
+    const [u, v, n] = FR[f], P = (su, sv) => n.clone().multiplyScalar(h).addScaledVector(u, su * hb).addScaledVector(v, sv * hb);
+    quad(f, P(-1, -1), n, P(1, -1), n, P(1, 1), n, P(-1, 1), n);
+  }
+  const NRM = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].map(V3);
+  for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) {   // 12 rounded edges
+    const nA = NRM[i], nB = NRM[j]; if (Math.abs(nA.dot(nB)) > 0.5) continue;
+    const c = new T.Vector3().crossVectors(nA, nB), dir = (t) => nA.clone().multiplyScalar(Math.cos(t * Math.PI / 2)).addScaledVector(nB, Math.sin(t * Math.PI / 2));
+    for (let k = 0; k < 2; k++) {
+      const t0 = k / 2, t1 = (k + 1) / 2, d0 = dir(t0), d1 = dir(t1), base = nA.clone().add(nB).multiplyScalar(hb);
+      const P = (d, s2) => base.clone().addScaledVector(d, b).addScaledVector(c, s2);
+      quad(k ? j : i, P(d0, -hb), d0, P(d0, hb), d0, P(d1, hb), d1, P(d1, -hb), d1);
+    }
+  }
+  for (const sx of [1, -1]) for (const sy of [1, -1]) for (const sz of [1, -1]) {   // 8 rounded corners (octant, one subdivision)
+    const nA = new T.Vector3(sx, 0, 0), nB = new T.Vector3(0, sy, 0), nC = new T.Vector3(0, 0, sz), ctr = nA.clone().add(nB).add(nC).multiplyScalar(hb);
+    const fa = sx > 0 ? 0 : 1, fb = sy > 0 ? 2 : 3, fc = sz > 0 ? 4 : 5, m = (p, q) => p.clone().add(q).normalize(), Pp = (d) => ctr.clone().addScaledVector(d, b);
+    const mAB = m(nA, nB), mBC = m(nB, nC), mCA = m(nC, nA);
+    tri(fa, Pp(nA), nA, Pp(mAB), mAB, Pp(mCA), mCA); tri(fb, Pp(nB), nB, Pp(mBC), mBC, Pp(mAB), mAB);
+    tri(fc, Pp(nC), nC, Pp(mCA), mCA, Pp(mBC), mBC); tri(fa, Pp(mAB), mAB, Pp(mBC), mBC, Pp(mCA), mCA);
+  }
+  const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new T.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uvs, 2));
+  g.computeBoundingSphere(); g.computeBoundingBox(); return g;
+}
+function boneAtlas() {
+  const c = mkCanvas(384, 64), g = c.getContext('2d'), mk = mkCanvas(384, 64), mg = mk.getContext('2d');
+  let rs = 424242; const R = () => { rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const LIFT = PIPGLOW ? 1.08 : 1, col = (r, gg, b, d = 0) => `rgb(${Math.max(0, Math.min(255, (r + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (gg + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (b + d) * LIFT)) | 0})`;
+  mg.fillStyle = '#000'; mg.fillRect(0, 0, 384, 64);
+  const disc = (ctx, cx, cy, r, fill) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill(); };
+  FACE_VAL.forEach((v, fi) => {
+    const x0 = fi * 64; g.save(); g.beginPath(); g.rect(x0, 0, 64, 64); g.clip(); g.translate(x0, 0);
+    g.fillStyle = col(166, 152, 108); g.fillRect(0, 0, 64, 64);
+    for (let k = 0; k < 16; k++) { const s2 = 8 + R() * 22; g.fillStyle = col(166 + (R() - .5) * 14, 152 + (R() - .5) * 18, 108 + (R() - .5) * 28); g.fillRect(R() * 64 - s2 / 2 | 0, R() * 64 - s2 / 2 | 0, s2 | 0, s2 * (.5 + R()) | 0); }   // yellowed / bleached patches
+    const gr = g.createRadialGradient(32, 32, 14, 32, 32, 46); gr.addColorStop(0, 'rgba(190,150,70,0)'); gr.addColorStop(1, 'rgba(160,118,48,.30)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);   // slight yellowing toward the edges
+    for (let k = 0; k < 110; k++) { g.fillStyle = R() < .75 ? col(136, 112, 74) : col(186, 172, 136); g.fillRect(R() * 64 | 0, R() * 64 | 0, 1, 1); }   // pores / grain
+    for (let k = 0; k < 2; k++) {                                // faint hairline cracks
+      let x = R() * 64, y = R() * 64, a = R() * 6.28; for (let q = 0; q < 10 + R() * 12; q++) { a += (R() - .5) * 1.1; x += Math.cos(a) * 2; y += Math.sin(a) * 2; g.fillStyle = 'rgba(120,88,52,.5)'; g.fillRect(x | 0, y | 0, 1, 1); g.fillStyle = 'rgba(255,248,230,.35)'; g.fillRect((x + 1) | 0, (y + 1) | 0, 1, 1); }
+    }
+    // worn edge band (this is what the rounded edge/corner geometry samples)
+    g.fillStyle = col(138, 116, 72); g.fillRect(0, 0, 64, 6); g.fillRect(0, 58, 64, 6); g.fillRect(0, 0, 6, 64); g.fillRect(58, 0, 6, 64);
+    g.fillStyle = col(152, 132, 88); g.fillRect(0, 3, 64, 3); g.fillRect(0, 58, 64, 3); g.fillRect(3, 0, 3, 64); g.fillRect(58, 0, 3, 64);
+    for (let k = 0; k < 40; k++) { g.fillStyle = R() < .5 ? col(204, 188, 150) : col(120, 94, 58); const side = (R() * 4) | 0, t = R() * 64 | 0, d = R() * 5 | 0; g.fillRect(side < 2 ? t : (side === 2 ? d : 63 - d), side < 2 ? (side ? 63 - d : d) : t, 1 + (R() * 2 | 0), 1); }   // nicks / chips
+    const L = 15.5, M = 32, Rr = 48.5, PP = { 1: [[M, M]], 2: [[L, L], [Rr, Rr]], 3: [[L, L], [M, M], [Rr, Rr]], 4: [[L, L], [Rr, L], [L, Rr], [Rr, Rr]], 5: [[L, L], [Rr, L], [M, M], [L, Rr], [Rr, Rr]], 6: [[L, L], [L, M], [L, Rr], [Rr, L], [Rr, M], [Rr, Rr]] }[v];
+    for (const [px, py] of PP) {
+      if (v === 1) {                                              // the lone pip: plain round dot, blood red
+        disc(g, px + 1, py + 1, 11.6, col(206, 192, 156)); disc(g, px, py, 10.6, col(56, 3, 10)); disc(g, px, py, 9.4, col(112, 6, 18));
+        disc(mg, px + x0, py, 9, '#fff');
+      } else {                                                     // carved pip: dark recess, lit lower-right lip, shadowed upper-left wall
+        disc(g, px + 1.1, py + 1.1, 8.2, col(212, 198, 162)); disc(g, px, py, 7.2, '#050302'); disc(g, px + 1.2, py + 1.2, 5.4, '#0f0805'); disc(g, px + 1.5, py + 1.5, 4.0, '#150c08');
+        disc(mg, px + x0, py, 6.6, '#fff');
+      }
+    }
+    g.restore();
+  });
+  const mkTex = (cv) => { const t = new THREE.CanvasTexture(cv); return nearest(t); };
+  return { tex: mkTex(c), mask: PIPGLOW ? mkTex(mk) : null };
+}
+const dieGeo = BONE ? roundedDieGeo(S, 0.085) : new THREE.BoxGeometry(S, S, S);
+const boneSet = BONE ? boneAtlas() : null;
+if (!BONE) {
+  dieGeo.clearGroups();
   const uv = dieGeo.attributes.uv, e = 0.004;
   for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setX(i, (f + e + uv.getX(i) * (1 - 2 * e)) / 6); }
   uv.needsUpdate = true;
 }
-const atlasTex = (() => {
+const atlasTex = BONE ? boneSet.tex : (() => {
   const c = mkCanvas(192, 32), g = c.getContext('2d');
   FACE_VAL.forEach((v, i) => g.drawImage(faceTex[v].image, i * 32, 0));
   return nearest(new THREE.CanvasTexture(c));
@@ -621,6 +697,7 @@ function randomQuat(wantTop) {
 }
 function dieMaterial(ghost) {
   const m = new THREE.MeshLambertMaterial({ map: atlasTex, transparent: !!ghost, opacity: ghost ? 0.7 : 1, depthWrite: !ghost });
+  if (PIPGLOW && !ghost) m.emissiveMap = boneSet.mask;       // pip-glow: emissive only where the mask has pips
   m.emissive = new THREE.Color(ghost ? 0x2a9aa8 : 0x2b2418);
   return psx(m);
 }
@@ -633,7 +710,7 @@ const diePool = []; let dieSeq = 0;      // finished dice are recycled (no mater
 function makeDie(gx, gy, q, delay) {
   let mesh = diePool.pop();
   if (!mesh) mesh = new THREE.Mesh(dieGeo, dieMaterial(false));
-  mesh.visible = true; mesh.scale.set(1, 1, 1); mesh.material.emissive.setRGB(0.17, 0.14, 0.1);
+  mesh.visible = true; mesh.scale.set(1, 1, 1); mesh.material.emissive.setRGB(EM0[0], EM0[1], EM0[2]);
   mesh.quaternion.copy(q);
   mesh.position.set(wx(gx), -S, wx(gy));
   scene.add(mesh);
@@ -1280,7 +1357,7 @@ function update(rawDt) {
   camera.lookAt(camTarget);
 }
 function setGlow(d, amt, white) {
-  const r = 0.17 + 1.0 * amt + white * 0.7, g = 0.14 + 0.32 * amt + white * 0.7, b = 0.1 + 0.08 * amt + white * 0.6;
+  const r = EM0[0] + 1.0 * amt + white * 0.7, g = EM0[1] + 0.32 * amt + white * 0.7, b = EM0[2] + 0.08 * amt + white * 0.6;
   if (r === d.gr && g === d.gg && b === d.gb) return;     // only touch the material when the glow actually changed
   d.gr = r; d.gg = g; d.gb = b; d.mesh.material.emissive.setRGB(r, g, b);
 }
@@ -1321,7 +1398,7 @@ function frame(now) {
 /* Pre-warm: compile every shader program and upload every texture now (ghost, rings, labels, particles, dice),
    so nothing hitches the first time an effect appears. */
 function prewarm() {
-  [atlasTex, slabTop.map, ringTex, ...boardTexs, ...digits.slice(1).flat()].forEach((t) => renderer.initTexture(t));
+  [atlasTex, ...(boneSet && boneSet.mask ? [boneSet.mask] : []), slabTop.map, ringTex, ...boardTexs, ...digits.slice(1).flat()].forEach((t) => renderer.initTexture(t));
   const objs = [ghost, selRing, tgtRing, ...Object.values(labels), partMesh, ...sigils.map((q) => q.m)], was = objs.map((o) => o.visible);
   objs.forEach((o) => { o.visible = true; });
   renderer.compile(scene, camera);

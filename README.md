@@ -16,3 +16,5 @@ Optional: `CNAME www` → `die-rite.com` (or its own Railway target) plus a redi
 
 ## Board drafts (branch board-drafts, not deployed)
 `?board=a|b|c` swaps in a stone-tile board + themed border (`&nodemo` hides the example pit + wall). Data-driven via `layout` (tile/pit) and `walls` (edge segments) inside `buildBoard()`.
+
+`?dice=bone` (draft, board-drafts branch): rounded bone dice (same single draw call); `&pipglow=1` makes only the pips glow while sinking.
