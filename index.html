@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261103-080640">
+<meta name="build" content="20261103-081710">
 <title>DEADROLL – dice prototype</title>
 <style>
   /* Press Start 2P (c) 2012 The Press Start 2P Project Authors, SIL Open Font License 1.1 — embedded below as base64 woff2 (latin subset). */
@@ -106,7 +106,7 @@
   #over{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;padding:0 22px;box-sizing:border-box;background:rgba(5,2,10,.74);pointer-events:auto;
     background-image:linear-gradient(0deg,rgba(0,0,0,.25) 1px,transparent 1px);background-size:100% 3px}
   #over.show{display:flex}
-  #overPanel{width:100%;max-width:320px;padding:22px 18px 22px;text-align:center;animation:slam .35s steps(5)}
+  #overPanel{width:100%;max-width:320px;padding:22px 18px 22px;text-align:center;animation:slam .35s ease-out}
   @keyframes slam{0%{transform:translateY(-60px) scale(1.15);opacity:0}100%{transform:none;opacity:1}}
   #overPanel h1{margin:0 0 16px;font-size:20px;line-height:24px;font-weight:400;color:#ff5a3a;text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 #5a0a14}
   #newbest{display:none;margin:-4px 0 14px;font-size:12px;color:var(--gold);animation:blink .4s steps(1) infinite;text-shadow:2px 2px 0 #5a1a07}
@@ -117,7 +117,7 @@
   #overPanel .line b i{font-style:normal;color:#4a3a6c;text-shadow:none}
   #overPanel .gap{height:10px}
   #confetti{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-  #confetti u{position:absolute;top:-10px;width:6px;height:6px;animation:fall 1.8s steps(14) forwards}
+  #confetti u{position:absolute;top:-10px;width:6px;height:6px;animation:fall 1.8s linear forwards}
   @keyframes fall{to{transform:translateY(900px)}}
   /* low-cost path (auto-enabled on slow devices, or ?lowfx=1) */
   .lowfx .panel,.lowfx #title,.lowfx #over{background-image:none}
@@ -499,19 +499,19 @@ const UP_KF = [{ color: '#ffd24a', transform: 'translateY(-2px)' }, { color: '#e
 function renderScore(flash) {
   const h = fmt6(shownScore);
   if (h !== lastScoreHtml) { lastScoreHtml = h; elScore.innerHTML = h; }
-  if (flash) elScore.animate(UP_KF, { duration: 160, easing: 'steps(2)' });
+  if (flash) elScore.animate(UP_KF, { duration: 160, easing: 'ease-out' });
   renderBest();
 }
 function commitBest() { if (score > best) { best = score; try { localStorage.setItem('deadroll-best', String(best)); } catch (e) { } } }
 function setCombo(n) {
   combo = n; elCombo.textContent = 'x' + n;
   elCombo.className = n === 0 ? 'zero' : (n >= 6 ? 't3' : n >= 3 ? 't2' : 't1'); elComboBox.classList.toggle('on', n > 0);
-  if (n > 0) elCombo.animate([{ transform: 'scale(1.6)' }, { transform: 'scale(.9)', offset: 0.5 }, { transform: 'scale(1)' }], { duration: 220, easing: 'steps(4)' });
+  if (n > 0) elCombo.animate([{ transform: 'scale(1.6)' }, { transform: 'scale(.9)', offset: 0.5 }, { transform: 'scale(1)' }], { duration: 220, easing: 'ease-out' });
 }
 function toast(txt, kind) {
   elToast.textContent = txt; elToast.className = kind || (combo >= 6 ? 't3' : combo >= 3 ? 't2' : '');
-  const k = (o, sc, ty) => ({ opacity: o, transform: `scale(${sc}) translateY(${ty || 0}px)`, easing: 'steps(1)' });
-  elToast.animate([{ ...k(1, 2.2), offset: 0 }, { ...k(1, .85), offset: .08 }, { ...k(1, 1.12), offset: .16 }, { ...k(1, 1), offset: .24 }, { ...k(1, 1), offset: .78 }, { ...k(0, 1), offset: .85 }, { ...k(1, 1), offset: .92 }, { ...k(0, 1, -12), offset: 1 }], { duration: 1150, fill: 'none' });
+  const k = (o, sc, ty, e) => ({ opacity: o, transform: `translate3d(0,${ty || 0}px,0) scale(${sc})`, easing: e || 'ease-out' });
+  elToast.animate([{ ...k(1, 2.2), offset: 0 }, { ...k(1, .85), offset: .08 }, { ...k(1, 1.12), offset: .16 }, { ...k(1, 1), offset: .24 }, { ...k(1, 1, 0, 'steps(1)'), offset: .78 }, { ...k(0, 1, 0, 'steps(1)'), offset: .85 }, { ...k(1, 1, 0, 'steps(1)'), offset: .92 }, { ...k(0, 1, -12), offset: 1 }], { duration: 1150, fill: 'none' });
 }
 const deferred = [];            // non-visual work (sound, haptics, popups, banners) runs one item per frame
 const defer = (fn) => { deferred.push(fn); };
@@ -520,14 +520,15 @@ const POPN = 10, popEls = [], _pp = new THREE.Vector3(); let popI = 0;
 for (let i = 0; i < POPN; i++) { const el = document.createElement('div'); el.className = 'pop'; $('hud').appendChild(el); popEls.push(el); }
 function popup(txt, pos, cls = '') {
   _pp.copy(pos).project(camera);
-  const x = Math.round((_pp.x * .5 + .5) * appRect.width), y = Math.round((-_pp.y * .5 + .5) * appRect.height);
+  const x = (_pp.x * .5 + .5) * appRect.width, y = (-_pp.y * .5 + .5) * appRect.height;   // sub-pixel start point; motion is a compositor-driven transform
   const el = popEls[popI++ % POPN]; if (el._a) el._a.cancel();
   let run = 0; for (let i = 0; i < POPN; i++) { const a = popEls[i]._a; if (a && a.playState === 'running') run++; }
   el.className = 'pop ' + cls + (run >= 3 || fxLevel > 0 ? ' cheap' : ''); if (el.textContent !== txt) el.textContent = txt;
-  const tr = (yy) => `translate(${x}px,${yy}px) translate(-50%,-50%)`;
-  el._a = el.animate([{ transform: tr(y), opacity: 1 }, { transform: tr(y - 36), opacity: 1, offset: 0.7 }, { transform: tr(y - 52), opacity: 0 }], { duration: 900, easing: 'steps(9)', fill: 'forwards' });
+  const tr = (yy, sc) => `translate3d(${x}px,${yy}px,0) translate(-50%,-50%) scale(${sc})`;   // transform + opacity only: runs on the compositor at full refresh rate
+  el._a = el.animate([{ transform: tr(y, .7), opacity: 1, easing: 'cubic-bezier(.2,.8,.3,1)' }, { transform: tr(y - 36, 1), opacity: 1, offset: 0.7, easing: 'linear' }, { transform: tr(y - 52, 1), opacity: 0 }], { duration: 900, easing: 'linear', fill: 'forwards' });
 }
-const spawnInterval = () => Math.max(2.6, 5.1 - spawnCount * 0.04);
+const SPAWN_FAST = 0.83;      // 17% faster than the previous pacing (was max(2.6, 5.1-0.04n))
+const spawnInterval = () => Math.max(2.6 * SPAWN_FAST, (5.1 - spawnCount * 0.04) * SPAWN_FAST);
 const emptyTiles = () => { const r = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x]) r.push([x, y]); return r; };
 
 function spawnDie(delay = 0) {
@@ -923,7 +924,7 @@ function update(rawDt) {
     const nowT = performance.now();
     if (nowT - lastScoreDom > 50 || shownScore === score) {          // DOM at ~20 Hz, not every frame
       lastScoreDom = nowT; renderScore(false);
-      if (nowT - lastCountTick > 70) { if (nowT - lastCountTick > 400) elScore.animate(UP_KF, { duration: 160, easing: 'steps(2)' }); lastCountTick = nowT; sfx('count', 1 + Math.min(0.8, combo * 0.08)); }
+      if (nowT - lastCountTick > 70) { if (nowT - lastCountTick > 400) elScore.animate(UP_KF, { duration: 160, easing: 'ease-out' }); lastCountTick = nowT; sfx('count', 1 + Math.min(0.8, combo * 0.08)); }
     }
   }
   // particles (pooled, instanced)

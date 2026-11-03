@@ -157,9 +157,13 @@ async def main():
         await page.wait_for_timeout(7500)
         pf2 = await page.evaluate('({programs:__game.perf.programs, dice:__game.dice.length, pool:__game.poolSize})')
         check('no shader recompiles during sink/pop; dice recycled into pool', pf2['programs'] == p0 and pf2['pool'] >= 1 and pf2['dice'] < 12, str(pf2)+f' before={p0}')
+        pk = await page.evaluate('''[...document.querySelectorAll('.pop')].flatMap(e=>e.getAnimations().flatMap(a=>[a.effect.getTiming().easing,...a.effect.getKeyframes().map(k=>k.easing)]))''')
+        check('floating text animates smoothly (no steps() easing)', len(pk)>0 and not any('steps' in x for x in pk), str(pk[:6]))
         # 7) spawning
         await page.evaluate('__game.clear(); __game.freezeSpawns(false)')
-        await page.wait_for_timeout(6200)
+        await page.wait_for_timeout(4600)
+        n = await page.evaluate('__game.dice.length'); check('dice spawn within 4.6s (interval <= 4.23s)', n >= 1, str(n))
+        await page.wait_for_timeout(1600)
         n = await page.evaluate('__game.dice.length'); check('dice spawn periodically', n >= 1, str(n))
         # 8) touch swipe via CDP
         await page.evaluate('__game.freezeSpawns(true); __game.clear(); __game.place(2,3,6)')
