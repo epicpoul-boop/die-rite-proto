@@ -143,6 +143,20 @@ async def main():
                 ok = ok and got==name
             check(f'[{VIEW}] swipe toward a neighbour tile on screen picks that direction', ok)
 
+        # perf guards: one draw call per die, shaders pre-warmed, low-cost path works
+        await page.evaluate('__game.freezeSpawns(true); __game.clear(); for(let x=0;x<6;x++){ __game.place(x,0,2); __game.place(x,1,x<3?3:5); }')
+        await page.wait_for_timeout(400)
+        pf = await page.evaluate('({calls:__game.perf.calls, programs:__game.perf.programs})')
+        check('draw calls stay low (12 dice, 1 call/die)', pf['calls'] <= 40, str(pf))
+        await page.evaluate('__game.evaluate()'); await page.wait_for_timeout(300)
+        p0 = await page.evaluate('__game.perf.programs'); await page.evaluate('__game.setFx(1)'); await page.wait_for_timeout(500)
+        e1 = await page.evaluate('__game.boardExtents()')
+        check('low-cost path (setFx 1) keeps board extents', abs(e1['minX']-e['minX'])<1.5 and abs(e1['maxY']-e['maxY'])<1.5, f"{e1['minX']:.1f} vs {e['minX']:.1f}")
+        await page.evaluate('__game.setFx(0)'); await page.wait_for_timeout(300)
+        # sink -> pop with pooled particles/popups; no new shader programs and no errors
+        await page.wait_for_timeout(7500)
+        pf2 = await page.evaluate('({programs:__game.perf.programs, dice:__game.dice.length, pool:__game.poolSize})')
+        check('no shader recompiles during sink/pop; dice recycled into pool', pf2['programs'] == p0 and pf2['pool'] >= 1 and pf2['dice'] < 12, str(pf2)+f' before={p0}')
         # 7) spawning
         await page.evaluate('__game.clear(); __game.freezeSpawns(false)')
         await page.wait_for_timeout(6200)
