@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261103-172524">
+<meta name="build" content="20261103-183541">
 <title>DIE RITE – a dice sacrifice puzzle</title>
 <style>
   /* Press Start 2P (c) 2012 The Press Start 2P Project Authors, SIL Open Font License 1.1 — embedded below as base64 woff2 (latin subset). */
@@ -19,6 +19,11 @@
   #hud{position:absolute;inset:0;pointer-events:none}
   #safe{position:absolute;left:0;top:0;width:1px;height:env(safe-area-inset-top);visibility:hidden}
   .lbl{font-size:8px;line-height:8px;color:var(--dim);white-space:nowrap}
+  #meterBox .lbl{display:flex;justify-content:space-between;align-items:baseline}
+  #stage{font-weight:400;color:var(--gold);text-shadow:1px 1px 0 #000;transform-origin:100% 50%}
+  #callout{position:absolute;left:50%;top:27%;transform:translate3d(-50%,0,0);width:max-content;max-width:92%;box-sizing:border-box;padding:9px 12px 8px;text-align:center;font-size:8px;line-height:13px;color:#fff;opacity:0;pointer-events:none;z-index:24;will-change:transform,opacity}
+  #callout i{display:block;font-style:normal;color:var(--gold);margin-bottom:3px}
+  #toast.rite2{font-size:15px;line-height:20px;color:#ffd24a;text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 #6a3a08,5px 5px 0 #000}
 
   /* ---- PS1 panel: hard pixel bevel, scanlines + 4px dither ---- */
   .panel{position:relative;box-sizing:border-box;background-color:#1a1030;
@@ -142,7 +147,7 @@
         <div id="comboBox" class="panel"><div class="lbl">CHANT</div><div id="combo" class="zero">x0</div></div>
       </div>
       <div class="row r2">
-        <div id="meterBox"><div class="lbl">NEXT OFFERING</div><div id="spawnbar"></div></div>
+        <div id="meterBox"><div class="lbl"><span>NEXT OFFERING</span><b id="stage">RITE I</b></div><div id="spawnbar"></div></div>
         <div id="btns">
           <button id="restart" class="ibtn" aria-label="Restart"><span class="ico" data-ico="reset"></span><span class="bl">RESET</span></button>
           <button id="view" class="ibtn" aria-label="Switch camera view"><span class="ico" data-ico="view"></span><span class="bl" id="viewLbl">FLAT</span></button>
@@ -151,6 +156,7 @@
       </div>
     </div>
     <div id="toast"></div>
+    <div id="callout" class="panel"></div>
     <div id="hint" class="panel" style="opacity:0"><span id="hint1">SWIPE TO ROLL · HOLD + DRAG TO SLIDE</span></div>
     <div id="flash"></div>
     <div id="over"><div id="confetti"></div>
@@ -210,7 +216,7 @@ renderer.setClearColor(0x0a0612, 1);
 const rt = new THREE.WebGLRenderTarget(540, 800, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true, generateMipmaps: false   // upscaled by the 'sharp bilinear' post pass: crisp texels, no jagged uneven pixels
 });
-const snapU = { value: new THREE.Vector2(TARGET_SNAP, 480) }, resU = { value: new THREE.Vector2(540, 800) }, riteU = { value: 0 };
+const snapU = { value: new THREE.Vector2(TARGET_SNAP, 480) }, resU = { value: new THREE.Vector2(540, 800) }, riteU = { value: 0 }, fadeU = { value: 0 };
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0612);
@@ -221,10 +227,10 @@ const camera = new THREE.PerspectiveCamera(38, 0.46, 0.1, 80);
 const postScene = new THREE.Scene();
 const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const postMat = new THREE.ShaderMaterial({
-  uniforms: { tDiffuse: { value: rt.texture }, uRes: resU, uRite: riteU },
+  uniforms: { tDiffuse: { value: rt.texture }, uRes: resU, uRite: riteU, uFade: fadeU },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform vec2 uRes; uniform float uRite; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform vec2 uRes; uniform float uRite, uFade; varying vec2 vUv;
     float m2(vec2 p){ return p.x*2.+p.y*3.-4.*p.x*p.y; }          // 2x2 Bayer cell {0,2,3,1}
     float bayer(vec2 p){ return (4.*m2(mod(p,2.)) + m2(mod(floor(p*.5),2.)))/16.-0.5; }   // 4x4 Bayer without a lookup array
     void main(){
@@ -237,6 +243,7 @@ const postMat = new THREE.ShaderMaterial({
       c*=1.0-0.55*smoothstep(0.35,0.85,v);
       c=mix(c, c*vec3(1.35,.55,.6)*(1.-.5*uRite), uRite);                       // the rite: board darkens and blushes red
       c*=1.-.35*uRite*smoothstep(.2,.8,v);
+      c*=1.-uFade;                                                              // hall / terrain transition: quick dip to black
       gl_FragColor=vec4(c,1.);
     }`,
   depthTest: false, depthWrite: false
@@ -309,14 +316,16 @@ const rimLong = new THREE.BoxGeometry(N + 0.6, 0.22, 0.3), rimShort = new THREE.
 for (const [g, x, z] of [[rimLong, 0, -(N / 2 + .15)], [rimLong, 0, N / 2 + .15], [rimShort, -(N / 2 + .15), 0], [rimShort, N / 2 + .15, 0]]) {
   const m = new THREE.Mesh(g, rimMat); m.position.set(x, 0.0, z); rimMeshes.push(m);
 }
-const boardVar = ['a', 'b', 'c'].includes(params.get('board')) ? params.get('board') : null;   // DRAFT: ?board=a|b|c (&nodemo hides the example pit + wall)
+const boardVar = ['a', 'b', 'c'].includes(params.get('board')) ? params.get('board') : null;   // ?board=a|b|c pins one hall (otherwise the stage picks it); ?board=old = legacy purple slab
+const boardOld = params.get('board') === 'old';
 
 /* ---------- board system: stone tiles + themed border (draft variants via ?board=a|b|c) ----------
    Data-driven so pits (void tiles) and walls (between-tile edges) are just entries in `layout` / `walls`.
    Everything is merged into ONE lit mesh (one atlas texture) + ONE additive glow mesh (candles, runes, grout glow). */
-const boardTexs = [], glowRunes = []; let boardTick = null;
-function buildBoard(V, demo) {
-  const AT = 512, e = 0.5 / AT;
+const boardTexs = [], glowRunes = [], boardCache = {}; let boardTick = null;
+function boardAssets(V) {          // painted once per variant (atlas + glow atlas + materials), reused by every rebuild
+  if (boardCache[V]) return boardCache[V];
+  const AT = 512;
   let rs = ({ a: 1234567, b: 7654321, c: 9988776 })[V] >>> 0;
   const R = () => { rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const ri = (n) => Math.floor(R() * n);
@@ -428,8 +437,22 @@ function buildBoard(V, demo) {
     GR.rune.forEach((r, i) => { gg.shadowColor = '#ff2a2a'; gg.shadowBlur = 8; gg.strokeStyle = '#fff'; gg.lineWidth = 4; gg.lineCap = 'round';
       RUNES[i].forEach((pl) => { gg.beginPath(); pl.forEach(([x, y], j) => { const X = r.x + 32 + (x - .5) * 44, Y = r.y + 32 + (y - .5) * 44; j ? gg.lineTo(X, Y) : gg.moveTo(X, Y); }); gg.stroke(); }); gg.shadowBlur = 0; }); }
   const gtex = new THREE.CanvasTexture(gA); gtex.magFilter = THREE.NearestFilter; gtex.minFilter = THREE.NearestFilter; gtex.generateMipmaps = false; boardTexs.push(gtex);
+  const mat = psx(new THREE.MeshLambertMaterial({ map: tex, vertexColors: true }), 1.0);
+  const gmat = psx(new THREE.MeshBasicMaterial({ map: gtex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide }), 1.0);
+  return boardCache[V] = { AT, rect, P, tex, gtex, GR, mat, gmat };
+}
+const gmesh_orig = (GL) => new Float32Array(GL.p);
+function buildBoard(V, terrain) {
+  const { AT, rect, P, tex, gtex, GR, mat, gmat } = boardAssets(V);
+  const vseed = ({ a: 1234567, b: 7654321, c: 9988776 })[V] >>> 0; let rs = vseed;
+  const seedR = (n) => { rs = (vseed + Math.imul(n + 1, 2654435761)) >>> 0; };
+  const R = () => { rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const ri = (n) => Math.floor(R() * n);
+  glowRunes.length = 0;
   /* ---- geometry accumulators ---- */
   const mk = () => ({ p: [], u: [], c: [] }), M = mk(), GL = mk();
+  const rngM = Array.from({ length: N * N + 1 }, () => []), rngG = Array.from({ length: N * N + 1 }, () => []);   // vertex ranges owned by each tile (last slot = everything else), used by the in-place morph
+  const mark = (ti, m0, g0) => { const m1 = M.p.length / 3, g1 = GL.p.length / 3; if (m1 > m0) rngM[ti].push([m0, m1]); if (g1 > g0) rngG[ti].push([g0, g1]); };
   const uvOf = (r, W, j, k, fl) => { const B = [[0, 1], [0, 0], [1, 0], [1, 1]][fl ? (k + 4 - j) % 4 : (j + k) % 4]; return [(r.x + 0.5 + B[0] * (r.w - 1)) / W, 1 - (r.y + 0.5 + (1 - B[1]) * (r.h - 1)) / W]; };
   function Q(A, pts, r, k, cols, hint, W, fl = 0) {            // quad with outward-winding fix
     let idx = [0, 1, 2, 3];
@@ -458,39 +481,41 @@ function buildBoard(V, demo) {
     side([[x1, yb, z0], [x0, yb, z0], [x0, ym, z0], [x1, ym, z0]], [0, 0, -1], S4[3]);
   }
   /* ---- layout data: tiles, pits, walls (the future-proof part) ---- */
-  const layout = Array.from({ length: N }, () => Array(N).fill('tile'));
+  const layout = Array.from({ length: N }, (_, gy) => Array.from({ length: N }, (_, gx) => (terrain.pit[gy][gx] ? 'pit' : 'tile')));
   const walls = [];                                           // {gx, gy, side:'e'|'s'}: wall on the east / south edge of tile (gx,gy)
-  if (demo) { layout[2][4] = 'pit'; walls.push({ gx: 1, gy: 3, side: 's' }); }
+  for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) { if (terrain.wallE[gy][gx]) walls.push({ gx, gy, side: 'e' }); if (terrain.wallS[gy][gx]) walls.push({ gx, gy, side: 's' }); }
   const present = (gx, gy) => gx >= 0 && gy >= 0 && gx < N && gy < N && layout[gy][gx] === 'tile';
   const wc = (i) => i - (N - 1) / 2, GAP = 0.03, FLOOR = -0.06, DEEP = -0.9;
   const tcol = () => P.tint.map((v) => v * (0.9 + R() * 0.2));
   for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
-    const cx = wc(gx), cz = wc(gy);
+    const cx = wc(gx), cz = wc(gy); seedR(100 + gy * N + gx); const m0 = M.p.length / 3, g0 = GL.p.length / 3, ti = gy * N + gx;
     if (!present(gx, gy)) {                                   // pit: dark floor far below (tile skirts next to it go all the way down)
       mq([[cx - .5, DEEP, cz - .5], [cx - .5, DEEP, cz + .5], [cx + .5, DEEP, cz + .5], [cx + .5, DEEP, cz - .5]], rect.deep, 0, Array(4).fill(scl(P.tint, .5)), [0, 1, 0]);
       if (V === 'b') gq([[cx - .5, DEEP + .02, cz - .5], [cx - .5, DEEP + .02, cz + .5], [cx + .5, DEEP + .02, cz + .5], [cx + .5, DEEP + .02, cz - .5]], GR.halo, 0, [1.5, .22, .15], [0, 1, 0]);
-      continue;
+      mark(ti, m0, g0); continue;
     }
     mq([[cx - .5, FLOOR, cz - .5], [cx - .5, FLOOR, cz + .5], [cx + .5, FLOOR, cz + .5], [cx + .5, FLOOR, cz - .5]], rect.mortar, ri(4), Array(4).fill(scl(P.tint, 1)), [0, 1, 0]);
     const h = -R() * 0.035, b = 0.035 + R() * 0.035, tn = tcol();
     const nb = [present(gx + 1, gy), present(gx - 1, gy), present(gx, gy + 1), present(gx, gy - 1)];
     block(cx - .5 + GAP, cx + .5 - GAP, nb.every((v) => v) ? FLOOR : DEEP, h, cz - .5 + GAP, cz + .5 - GAP, b, { top: rect.tile[ri(8)], topK: ri(4), topFl: ri(2), bev: rect.bev[ri(4)], side: rect.side[ri(4)], tint: tn, deep: true, sides: nb.map((v) => v ? 0 : 1) });
+    mark(ti, m0, g0);
     if (nb.some((v) => !v)) {}                                  // (sides only drawn where a neighbour is missing; interior gaps show the mortar)
   }
   // faces towards neighbours that exist are skipped; give every tile a short skirt so gaps look deep rather than flat
   for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) if (present(gx, gy)) {
-    const cx = wc(gx), cz = wc(gy), ds = scl(P.tint, .22), x0 = cx - .5 + GAP, x1 = cx + .5 - GAP, z0 = cz - .5 + GAP, z1 = cz + .5 - GAP;
+    const m0 = M.p.length / 3, g0 = GL.p.length / 3, cx = wc(gx), cz = wc(gy), ds = scl(P.tint, .22), x0 = cx - .5 + GAP, x1 = cx + .5 - GAP, z0 = cz - .5 + GAP, z1 = cz + .5 - GAP;
     const sk = (pts, hint) => mq(pts, rect.side[0], 0, [ds, ds, scl(P.tint, .06), scl(P.tint, .06)], hint);
     if (present(gx + 1, gy)) sk([[x1, -.02, z1], [x1, -.02, z0], [x1, FLOOR, z0], [x1, FLOOR, z1]], [1, 0, 0]);
     if (present(gx - 1, gy)) sk([[x0, -.02, z0], [x0, -.02, z1], [x0, FLOOR, z1], [x0, FLOOR, z0]], [-1, 0, 0]);
     if (present(gx, gy + 1)) sk([[x0, -.02, z1], [x1, -.02, z1], [x1, FLOOR, z1], [x0, FLOOR, z1]], [0, 0, 1]);
     if (present(gx, gy - 1)) sk([[x1, -.02, z0], [x0, -.02, z0], [x0, FLOOR, z0], [x1, FLOOR, z0]], [0, 0, -1]);
+    mark(gy * N + gx, m0, g0);
   }
   /* ---- border (outer footprint identical to the old rim: 0.3 wide, out to N/2+0.3) ---- */
   const HB = N / 2, BW = 0.3, bt = scl(P.tint, 1);
   const hts = { a: [0.11, 0.3], b: [0.14, 0.36], c: [0.3, 0.5] }[V];
   const sidesOut = (o) => o;                                  // (rim blocks: all four sides drawn; deep skirt hides the slab body)
-  const sideK = { n: 0, e: 1, s: 2, w: 3 };
+  const sideK = { n: 0, e: 1, s: 2, w: 3 }; seedR(5000);
   const edges = [['n', -1], ['s', 1], ['w', -1], ['e', 1]];
   for (const [sd, sg] of edges) {
     const horiz = sd === 'n' || sd === 's';
@@ -512,7 +537,7 @@ function buildBoard(V, demo) {
     }
   }
   /* corners: pillars (candles on A, gem obelisks on B, capped pillar blocks on C) */
-  const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]]; seedR(6000);
   const lit = []; 
   for (const [sx, sz] of corners) {
     const x0 = sx < 0 ? -HB - BW : HB, z0 = sz < 0 ? -HB - BW : HB, yh = hts[1] + R() * 0.02;
@@ -537,6 +562,7 @@ function buildBoard(V, demo) {
   }
   /* ---- the demo wall (between two tiles) ---- */
   for (const w of walls) {
+    seedR(7000 + w.gy * N + w.gx + (w.side === 's' ? 100 : 0));
     const east = w.side === 'e', cx = wc(w.gx) + (east ? .5 : 0), cz = wc(w.gy) + (east ? 0 : .5), tw = 0.085;
     const bx = east ? [cx - tw, cx + tw, cz - .5 + GAP, cz + .5 - GAP] : [cx - .5 + GAP, cx + .5 - GAP, cz - tw, cz + tw];
     const parts = V === 'c' ? [[0, .5, .66], [.5, 1, .46]] : [[0, 1, V === 'b' ? .7 : .62]];     // C: crumbled, stepped top
@@ -550,11 +576,12 @@ function buildBoard(V, demo) {
   if (V === 'b') {
     const sy = FLOOR + 0.004, sw = 0.022;
     for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) if (present(gx, gy)) {
-      const cx = wc(gx), cz = wc(gy), col = [.42, .05, .05];
+      const m0 = M.p.length / 3, g0 = GL.p.length / 3, cx = wc(gx), cz = wc(gy), col = [.42, .05, .05];
       if (gx === N - 1 || present(gx + 1, gy)) gq([[cx + .5 - sw, sy, cz - .5], [cx + .5 - sw, sy, cz + .5], [cx + .5 + sw, sy, cz + .5], [cx + .5 + sw, sy, cz - .5]], GR.solid, 0, col, [0, 1, 0]);
       if (gx === 0) gq([[cx - .5 - sw, sy, cz - .5], [cx - .5 - sw, sy, cz + .5], [cx - .5 + sw, sy, cz + .5], [cx - .5 + sw, sy, cz - .5]], GR.solid, 0, col, [0, 1, 0]);
       if (gy === N - 1 || present(gx, gy + 1)) gq([[cx - .5, sy, cz + .5 - sw], [cx - .5, sy, cz + .5 + sw], [cx + .5, sy, cz + .5 + sw], [cx + .5, sy, cz + .5 - sw]], GR.solid, 0, col, [0, 1, 0]);
       if (gy === 0) gq([[cx - .5, sy, cz - .5 - sw], [cx - .5, sy, cz - .5 + sw], [cx + .5, sy, cz - .5 + sw], [cx + .5, sy, cz - .5 - sw]], GR.solid, 0, col, [0, 1, 0]);
+      mark(gy * N + gx, m0, g0);
     }
   }
   for (const [x, y, z, s2, k, rn] of glowRunes) {              // B: glowing runes on the border tops
@@ -563,15 +590,59 @@ function buildBoard(V, demo) {
   /* ---- build meshes ---- */
   const mkGeo = (A) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(A.p, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(A.u, 2)); geo.setAttribute('color', new THREE.Float32BufferAttribute(A.c, 3)); return geo; };
   const geo = mkGeo(M); geo.computeVertexNormals();
-  const mat = psx(new THREE.MeshLambertMaterial({ map: tex, vertexColors: true }), 1.0);
   const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; scene.add(mesh);
-  const gmat = psx(new THREE.MeshBasicMaterial({ map: gtex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide }), 1.0);
   const gmesh = new THREE.Mesh(mkGeo(GL), gmat); gmesh.frustumCulled = false; gmesh.renderOrder = 2; scene.add(gmesh);
+  const ex = (rng, tot) => { const own = new Uint8Array(tot); rng.forEach((l, i) => { if (i < N * N) l.forEach(([a, b]) => own.fill(1, a, b)); });
+    let a = -1; for (let v = 0; v <= tot; v++) { if (v < tot && !own[v]) { if (a < 0) a = v; } else if (a >= 0) { rng[N * N].push([a, v]); a = -1; } } };
+  ex(rngM, M.p.length / 3); ex(rngG, GL.p.length / 3);
+  const origM = geo.attributes.position.array.slice(), origG = gmesh_orig(GL);
   boardTick = (t) => { gmat.opacity = 0.8 + 0.2 * Math.sin(t * 9) * Math.sin(t * 5.3 + 1) + 0.06 * Math.sin(t * 23); };
-  return { layout, walls, mesh, gmesh, tris: M.p.length / 9, gtris: GL.p.length / 9 };
+  return { layout, walls, mesh, gmesh, V, mat, gmat, tick: boardTick, rngM, rngG, origM, origG, tris: M.p.length / 9, gtris: GL.p.length / 9, dispose() { scene.remove(mesh); scene.remove(gmesh); geo.dispose(); gmesh.geometry.dispose(); } };
 }
 let boardInfo = null;
-if (boardVar) boardInfo = buildBoard(boardVar, !params.has('nodemo')); else { scene.add(slab); rimMeshes.forEach((m) => scene.add(m)); }
+/* In-place hall morph: the next hall is built with the same terrain, then tile by tile (a wave across the board) each tile dips, swaps and settles.
+   Per-tile vertex ranges of the merged meshes are collapsed (degenerate) or restored, so dice, pits and walls are never touched. */
+let morph = null;
+function boardVis(info, ti, vis, dy) {
+  for (const [mesh, rng, orig] of [[info.mesh, info.rngM, info.origM], [info.gmesh, info.rngG, info.origG]]) {
+    const pos = mesh.geometry.attributes.position.array;
+    for (const [a, b] of rng[ti]) {
+      if (vis) for (let v = a; v < b; v++) { pos[v * 3] = orig[v * 3]; pos[v * 3 + 1] = orig[v * 3 + 1] + dy; pos[v * 3 + 2] = orig[v * 3 + 2]; }
+      else { const x = orig[a * 3], y = orig[a * 3 + 1] - 30, z = orig[a * 3 + 2]; for (let v = a; v < b; v++) { pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z; } }
+    }
+    mesh.geometry.attributes.position.needsUpdate = true;
+  }
+}
+function startMorph(toV) {
+  if (morph) finishMorph();
+  const from = boardInfo, to = buildBoard(toV, terrain), tickTo = to.tick; to.tick = tickTo;
+  const tickFrom = from.tick; boardTick = (t) => { tickFrom(t); tickTo(t); };
+  for (let i = 0; i <= N * N; i++) boardVis(to, i, false, 0);          // new hall starts fully collapsed
+  const order = []; for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) order.push({ i: gy * N + gx, gx, gy, at: (gx + gy) / (2 * N - 2) * 1.7 + (((gx * 7 + gy * 13) % 5) * 0.03), done: 0 });
+  morph = { from, to, t: 0, order, extras: false, dur: 0.55, total: 1.7 + 0.15 + 0.55 };
+  shake = Math.max(shake, 0.12); defer(() => sfx('rumble'));
+}
+function finishMorph() {
+  if (!morph) return; const m = morph; morph = null;
+  for (let i = 0; i <= N * N; i++) boardVis(m.to, i, true, 0);
+  m.from.dispose(); boardInfo = m.to; boardTick = m.to.tick;
+}
+function updateMorph(rawDt) {
+  if (!morph) return; const m = morph; m.t += rawDt;
+  if (!m.extras && m.t > m.total * 0.45) { m.extras = true; boardVis(m.from, N * N, false, 0); boardVis(m.to, N * N, true, 0); }   // border, candles, walls: swapped mid-wave
+  for (const o of m.order) {
+    const p = Math.min(1, Math.max(0, (m.t - o.at) / m.dur));
+    if (p <= 0 || o.done === 2) continue;
+    const dy = -0.09 * Math.sin(Math.PI * p);
+    if (p < 0.5) { boardVis(m.from, o.i, true, dy); o.done = 0.5; }
+    else {
+      if (o.done < 1) { boardVis(m.from, o.i, false, 0); o.done = 1; if (!(m.burstN > 4 && (o.i & 1))) { burst(wx(o.gx), 0.05, wx(o.gy), 2, 0.35); m.burstN = (m.burstN || 0) + 1; } }
+      boardVis(m.to, o.i, true, dy); if (p >= 1) { boardVis(m.to, o.i, true, 0); o.done = 2; }
+    }
+  }
+  if (m.t >= m.total) finishMorph();
+}
+if (boardOld) { scene.add(slab); rimMeshes.forEach((m) => scene.add(m)); }
 // moody floating shards in the void
 const shards = [];
 const shardGeo = new THREE.OctahedronGeometry(1, 0);
@@ -598,13 +669,13 @@ const FACE_VAL = [3, 4, 1, 6, 2, 5];
 /* ---------- BONE dice (draft: ?dice=bone, optional &pipglow=1) ----------
    Same single-draw-call die: one mesh, one 384x64 atlas (six 64px faces). The cube has real rounded edges (2-segment arcs, smooth normals).
    Pips are carved dark discs; the single pip on the 1 face is a plain round blood-red dot. */
-const BONE = params.get('dice') === 'bone', PIPGLOW = BONE && params.has('pipglow');
+const BONE = params.get('dice') !== 'classic', PIPGLOW = BONE && params.has('pipglow');   // bone dice are the default; ?dice=classic = old cream dice; ?pipglow=1 = glowing pips
 const EM0 = PIPGLOW ? [0, 0, 0] : BONE ? [0.035, 0.03, 0.025] : [0.17, 0.14, 0.1];      // resting emissive: with pip-glow the body is NOT tinted, only pips light up
-function roundedDieGeo(Ssz, b) {
+function roundedDieGeo(Ssz, b, row = 0) {
   const h = Ssz / 2, hb = h - b, T = THREE, V3 = (a) => new T.Vector3(...a);
   const FR = [[[0, 0, -1], [0, 1, 0], [1, 0, 0]], [[0, 0, 1], [0, 1, 0], [-1, 0, 0]], [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[1, 0, 0], [0, 0, 1], [0, -1, 0]], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]].map((f) => f.map(V3));
-  const pos = [], nor = [], uvs = [], CW = 64, AW = 384;
-  const uvFor = (f, P) => { const fr = FR[f], cu = Math.min(1, Math.max(0, P.dot(fr[0]) / Ssz + .5)), cv = Math.min(1, Math.max(0, P.dot(fr[1]) / Ssz + .5)); return [(f * CW + 0.5 + cu * (CW - 1)) / AW, (0.5 + cv * (CW - 1)) / CW]; };
+  const pos = [], nor = [], uvs = [], CW = 64, AW = 384, AH = 192;
+  const uvFor = (f, P) => { const fr = FR[f], cu = Math.min(1, Math.max(0, P.dot(fr[0]) / Ssz + .5)), cv = Math.min(1, Math.max(0, P.dot(fr[1]) / Ssz + .5)); return [(f * CW + 0.5 + cu * (CW - 1)) / AW, ((2 - row) * CW + 0.5 + cv * (CW - 1)) / AH]; };
   const tri = (f, P0, N0, P1, N1, P2, N2) => {
     const e1 = P1.clone().sub(P0), e2 = P2.clone().sub(P0), nn = e1.cross(e2), avg = N0.clone().add(N1).add(N2);
     if (nn.dot(avg) < 0) { [P1, P2] = [P2, P1]; [N1, N2] = [N2, N1]; }
@@ -636,16 +707,32 @@ function roundedDieGeo(Ssz, b) {
   g.computeBoundingSphere(); g.computeBoundingBox(); return g;
 }
 function boneAtlas() {
-  const c = mkCanvas(384, 64), g = c.getContext('2d'), mk = mkCanvas(384, 64), mg = mk.getContext('2d');
+  const c = mkCanvas(384, 192), g = c.getContext('2d'), mk = mkCanvas(384, 192), mg = mk.getContext('2d');   // rows: 0 bone, 1 chained, 2 slime
   let rs = 424242; const R = () => { rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const LIFT = PIPGLOW ? 1.08 : 1, col = (r, gg, b, d = 0) => `rgb(${Math.max(0, Math.min(255, (r + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (gg + d) * LIFT)) | 0},${Math.max(0, Math.min(255, (b + d) * LIFT)) | 0})`;
-  mg.fillStyle = '#000'; mg.fillRect(0, 0, 384, 64);
+  mg.fillStyle = '#000'; mg.fillRect(0, 0, 384, 192);
   const disc = (ctx, cx, cy, r, fill) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill(); };
-  FACE_VAL.forEach((v, fi) => {
-    const x0 = fi * 64; g.save(); g.beginPath(); g.rect(x0, 0, 64, 64); g.clip(); g.translate(x0, 0);
+  const chainBand = () => {                                       // iron chain links hugging all four face edges + rivets: pips stay clear
+    g.fillStyle = 'rgba(14,14,22,.6)'; g.fillRect(0, 0, 64, 9); g.fillRect(0, 55, 64, 9); g.fillRect(0, 0, 9, 64); g.fillRect(55, 0, 9, 64);
+    const link = (x, y, w, h, hor) => { g.lineWidth = 2; g.strokeStyle = '#1a1c24'; g.beginPath(); g.ellipse(x, y, w / 2 + 1, h / 2 + 1, 0, 0, 6.2832); g.stroke();
+      g.lineWidth = 1.6; g.strokeStyle = hor ? '#a4aabc' : '#6a7084'; g.beginPath(); g.ellipse(x, y, w / 2, h / 2, 0, 0, 6.2832); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(x - w / 2 + 1, y - h / 2 + 1, 2, 1); };
+    for (let t = 4; t < 64; t += 7) { const hor = ((t - 4) / 7) % 2 === 0; link(t, 4.5, hor ? 9 : 5, hor ? 5.5 : 7, hor); link(t, 59.5, hor ? 9 : 5, hor ? 5.5 : 7, hor); link(4.5, t, hor ? 5.5 : 7, hor ? 9 : 5, hor); link(59.5, t, hor ? 5.5 : 7, hor ? 9 : 5, hor); }
+    for (const [x, y] of [[4, 4], [60, 4], [4, 60], [60, 60]]) { disc(g, x, y, 4.2, '#15161e'); disc(g, x, y, 3.2, '#7a8094'); disc(g, x - 1, y - 1, 1.2, '#dfe4f2'); }
+    for (let k = 0; k < 26; k++) { g.fillStyle = 'rgba(120,70,36,.55)'; g.fillRect(R() * 64 | 0, R() < .5 ? (R() * 8 | 0) : 56 + (R() * 8 | 0), 1, 1); }       // rust
+  };
+  const slimeCoat = () => {                                        // sickly green coating: translucent wash, drips from the top edge, glossy glints
+    g.fillStyle = 'rgba(70,150,36,.46)'; g.fillRect(0, 0, 64, 64);
+    for (let k = 0; k < 7; k++) { const x = 3 + R() * 58, w = 3 + R() * 4, l = 8 + R() * 22; g.fillStyle = 'rgba(50,128,28,.78)'; g.fillRect(x - w / 2 | 0, 0, w | 0, l | 0); disc(g, x, l, w / 2 + .4, 'rgba(50,128,28,.78)'); g.fillStyle = 'rgba(190,255,130,.6)'; g.fillRect(x - w / 2 + 1 | 0, 2, 1, (l - 3) | 0); }
+    g.fillStyle = 'rgba(60,140,30,.7)'; g.fillRect(0, 0, 64, 5); g.fillRect(0, 59, 64, 5); g.fillRect(0, 0, 5, 64); g.fillRect(59, 0, 5, 64);
+    for (let k = 0; k < 9; k++) { const x = R() * 60 + 2, y = R() * 60 + 2; g.fillStyle = 'rgba(236,255,200,.75)'; g.fillRect(x | 0, y | 0, 3, 2); g.fillRect(x | 0, (y + 2) | 0, 1, 1); }
+    for (let k = 0; k < 6; k++) disc(g, R() * 64, R() * 64, 1.5 + R() * 2.5, 'rgba(130,220,70,.35)');
+  };
+  [0, 1, 2].forEach((row) => FACE_VAL.forEach((v, fi) => {
+    const x0 = fi * 64, y0 = row * 64; g.save(); g.beginPath(); g.rect(x0, y0, 64, 64); g.clip(); g.translate(x0, y0);
     g.fillStyle = col(166, 152, 108); g.fillRect(0, 0, 64, 64);
     for (let k = 0; k < 16; k++) { const s2 = 8 + R() * 22; g.fillStyle = col(166 + (R() - .5) * 14, 152 + (R() - .5) * 18, 108 + (R() - .5) * 28); g.fillRect(R() * 64 - s2 / 2 | 0, R() * 64 - s2 / 2 | 0, s2 | 0, s2 * (.5 + R()) | 0); }   // yellowed / bleached patches
-    const gr = g.createRadialGradient(32, 32, 14, 32, 32, 46); gr.addColorStop(0, 'rgba(190,150,70,0)'); gr.addColorStop(1, 'rgba(160,118,48,.30)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);   // slight yellowing toward the edges
+    const gr = g.createRadialGradient(32, 32, 14, 32, 32, 46); gr.addColorStop(0, 'rgba(160,118,48,0)'); gr.addColorStop(1, 'rgba(160,118,48,.30)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);   // slight yellowing toward the edges
     for (let k = 0; k < 110; k++) { g.fillStyle = R() < .75 ? col(136, 112, 74) : col(186, 172, 136); g.fillRect(R() * 64 | 0, R() * 64 | 0, 1, 1); }   // pores / grain
     for (let k = 0; k < 2; k++) {                                // faint hairline cracks
       let x = R() * 64, y = R() * 64, a = R() * 6.28; for (let q = 0; q < 10 + R() * 12; q++) { a += (R() - .5) * 1.1; x += Math.cos(a) * 2; y += Math.sin(a) * 2; g.fillStyle = 'rgba(120,88,52,.5)'; g.fillRect(x | 0, y | 0, 1, 1); g.fillStyle = 'rgba(255,248,230,.35)'; g.fillRect((x + 1) | 0, (y + 1) | 0, 1, 1); }
@@ -654,22 +741,25 @@ function boneAtlas() {
     g.fillStyle = col(138, 116, 72); g.fillRect(0, 0, 64, 6); g.fillRect(0, 58, 64, 6); g.fillRect(0, 0, 6, 64); g.fillRect(58, 0, 6, 64);
     g.fillStyle = col(152, 132, 88); g.fillRect(0, 3, 64, 3); g.fillRect(0, 58, 64, 3); g.fillRect(3, 0, 3, 64); g.fillRect(58, 0, 3, 64);
     for (let k = 0; k < 40; k++) { g.fillStyle = R() < .5 ? col(204, 188, 150) : col(120, 94, 58); const side = (R() * 4) | 0, t = R() * 64 | 0, d = R() * 5 | 0; g.fillRect(side < 2 ? t : (side === 2 ? d : 63 - d), side < 2 ? (side ? 63 - d : d) : t, 1 + (R() * 2 | 0), 1); }   // nicks / chips
+    if (row === 2) slimeCoat();
+    if (row === 1) chainBand();
     const L = 15.5, M = 32, Rr = 48.5, PP = { 1: [[M, M]], 2: [[L, L], [Rr, Rr]], 3: [[L, L], [M, M], [Rr, Rr]], 4: [[L, L], [Rr, L], [L, Rr], [Rr, Rr]], 5: [[L, L], [Rr, L], [M, M], [L, Rr], [Rr, Rr]], 6: [[L, L], [L, M], [L, Rr], [Rr, L], [Rr, M], [Rr, Rr]] }[v];
     for (const [px, py] of PP) {
       if (v === 1) {                                              // the lone pip: plain round dot, blood red
         disc(g, px + 1, py + 1, 11.6, col(206, 192, 156)); disc(g, px, py, 10.6, col(56, 3, 10)); disc(g, px, py, 9.4, col(112, 6, 18));
-        disc(mg, px + x0, py, 9, '#fff');
+        disc(mg, px + x0, py + y0, 9, '#fff');
       } else {                                                     // carved pip: dark recess, lit lower-right lip, shadowed upper-left wall
         disc(g, px + 1.1, py + 1.1, 8.2, col(212, 198, 162)); disc(g, px, py, 7.2, '#050302'); disc(g, px + 1.2, py + 1.2, 5.4, '#0f0805'); disc(g, px + 1.5, py + 1.5, 4.0, '#150c08');
-        disc(mg, px + x0, py, 6.6, '#fff');
+        disc(mg, px + x0, py + y0, 6.6, '#fff');
       }
     }
     g.restore();
-  });
+  }));
   const mkTex = (cv) => { const t = new THREE.CanvasTexture(cv); return nearest(t); };
   return { tex: mkTex(c), mask: PIPGLOW ? mkTex(mk) : null };
 }
-const dieGeo = BONE ? roundedDieGeo(S, 0.085) : new THREE.BoxGeometry(S, S, S);
+const dieGeo = BONE ? roundedDieGeo(S, 0.085, 0) : new THREE.BoxGeometry(S, S, S);
+const dieGeos = BONE ? { normal: dieGeo, chained: roundedDieGeo(S, 0.085, 1), slime: roundedDieGeo(S, 0.085, 2) } : { normal: dieGeo, chained: dieGeo, slime: dieGeo };
 const boneSet = BONE ? boneAtlas() : null;
 if (!BONE) {
   dieGeo.clearGroups();
@@ -704,17 +794,24 @@ function dieMaterial(ghost) {
 
 const grid = Array.from({ length: N }, () => Array(N).fill(null));
 let dice = [], chains = []; const tmpDice = [];
+/* ---------- terrain: pits (void tiles) + walls (edges between tiles) ---------- */
+const mkFlags = () => Array.from({ length: N }, () => Array(N).fill(false));
+const terrain = { pit: mkFlags(), wallE: mkFlags(), wallS: mkFlags() };     // wallE[y][x]: wall between (x,y)-(x+1,y); wallS[y][x]: between (x,y)-(x,y+1)
+const edgeBlocked = (gx, gy, dx, dy) => dx === 1 ? terrain.wallE[gy][gx] : dx === -1 ? (gx > 0 && terrain.wallE[gy][gx - 1]) : dy === 1 ? terrain.wallS[gy][gx] : (gy > 0 && terrain.wallS[gy - 1][gx]);
+function canStep(gx, gy, dx, dy) { const tx = gx + dx, ty = gy + dy; if (tx < 0 || ty < 0 || tx >= N || ty >= N || terrain.pit[ty][tx] || grid[ty][tx]) return false; return !edgeBlocked(gx, gy, dx, dy); }
+function slideDest(d, dir) { let x = d.gx, y = d.gy, n = 0; while (canStep(x, y, dir[0], dir[1])) { x += dir[0]; y += dir[1]; n++; } return n ? [x, y] : null; }
+const playableCount = () => { let n = 0; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!terrain.pit[y][x]) n++; return n; };
 const wx = (gx) => gx - (N - 1) / 2;
 
 const diePool = []; let dieSeq = 0;      // finished dice are recycled (no material/geometry churn, no shader program release)
-function makeDie(gx, gy, q, delay) {
+function makeDie(gx, gy, q, delay, kind = 'normal') {
   let mesh = diePool.pop();
   if (!mesh) mesh = new THREE.Mesh(dieGeo, dieMaterial(false));
-  mesh.visible = true; mesh.scale.set(1, 1, 1); mesh.material.emissive.setRGB(EM0[0], EM0[1], EM0[2]);
+  mesh.geometry = dieGeos[kind]; mesh.visible = true; mesh.scale.set(1, 1, 1); mesh.material.emissive.setRGB(EM0[0], EM0[1], EM0[2]);
   mesh.quaternion.copy(q);
   mesh.position.set(wx(gx), -S, wx(gy));
   scene.add(mesh);
-  const d = { id: ++dieSeq, gr: -1, gg: -1, gb: -1, lift: 0, slide: false, chain: null, shown: 0, pts: 0, chainPop: false, mesh, gx, gy, top: topOf(q), state: 'rising', t: -(delay || 0) / RISE_T, bounce: 1, nudge: 0, sinkT: 0, delay: 0, flash: 0, pitchIdx: 0 };
+  const d = { kind, slimeDir: null, id: ++dieSeq, gr: -1, gg: -1, gb: -1, lift: 0, slide: false, chain: null, shown: 0, pts: 0, chainPop: false, mesh, gx, gy, top: topOf(q), state: 'rising', t: -(delay || 0) / RISE_T, bounce: 1, nudge: 0, sinkT: 0, delay: 0, flash: 0, pitchIdx: 0 };
   mesh.userData.die = d;
   grid[gy][gx] = d; dice.push(d);
   return d;
@@ -918,9 +1015,94 @@ function popup(txt, pos, cls = '') {
   const tr = (yy, sc) => `translate3d(${x}px,${yy}px,0) translate(-50%,-50%) scale(${sc})`;   // transform + opacity only: runs on the compositor at full refresh rate
   el._a = el.animate([{ transform: tr(y, .7), opacity: 1, easing: 'cubic-bezier(.2,.8,.3,1)' }, { transform: tr(y - 36, 1), opacity: 1, offset: 0.7, easing: 'linear' }, { transform: tr(y - 52, 1), opacity: 0 }], { duration: 900, easing: 'linear', fill: 'forwards' });
 }
+/* ---------- endless mode: RITE I, II, III ... ----------
+   One new twist at a time, each announced with a calmer breather; after the last twist the existing ones just ramp (capped). */
+const STAGE_DUR = 150, STAGE_SCORE = [1500, 3500, 6000, 9000, 12500], LATE_DUR = 120, LATE_SCORE = 4000, L_MAX = 6, BREATHER = 13;
+let stage = 0, stageT = 0, stageScore0 = 0, breatherT = 0, forceKind = null, boardFade = null;
+const startStage = Math.max(0, parseInt(params.get('stage') || '0') || 0);
+const cfgOf = (n) => ({ chained: n >= 1, slime: n >= 2, pits: n >= 3, walls: n >= 4, mix: n >= 5, quick: n >= 8, L: Math.min(L_MAX, Math.max(0, n - 4)) });
+const cfg = () => cfgOf(stage);
+const hallFor = (n) => boardVar || (n < 5 ? 'a' : n < 8 ? 'c' : 'b');       // grey stone -> mossy jungle temple (when the twists start to mix) -> dark basalt (second escalation)
+const roman = (n) => { let r = ''; for (const [v, t] of [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) while (n >= v) { r += t; n -= v; } return r; };
+let ts = (parseInt(params.get('seed') || '0') >>> 0) ^ 0x9e3779b9;
+const trnd = () => { ts = ts + 0x6D2B79F5 | 0; let t = Math.imul(ts ^ ts >>> 15, 1 | ts); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+function connectedFlags(t) {                      // every non-pit tile must still be reachable (ignoring dice) through the open edges
+  let total = 0, start = null; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!t.pit[y][x]) { total++; if (!start) start = [x, y]; }
+  if (!start) return false; const seen = new Set([start[0] + ',' + start[1]]), q = [start];
+  while (q.length) { const [x, y] = q.pop(); for (const [dx, dy] of NB) { const a = x + dx, b = y + dy; if (a < 0 || b < 0 || a >= N || b >= N || t.pit[b][a]) continue;
+    const blocked = dx === 1 ? t.wallE[y][x] : dx === -1 ? t.wallE[y][a] : dy === 1 ? t.wallS[y][x] : t.wallS[b][x]; if (blocked || seen.has(a + ',' + b)) continue; seen.add(a + ',' + b); q.push([a, b]); } }
+  return seen.size === total;
+}
+function genTerrain(n) {
+  const c = cfgOf(n), nPits = c.pits ? Math.min(5, 2 + Math.floor(c.L / 2)) : 0, nWalls = c.walls ? Math.min(8, 3 + c.L) : 0;
+  const cand = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x]) cand.push([x, y]);      // pits only open under EMPTY tiles
+  const edges = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (x < N - 1) edges.push(['E', x, y]); if (y < N - 1) edges.push(['S', x, y]); }
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const t = { pit: mkFlags(), wallE: mkFlags(), wallS: mkFlags() }, pool1 = cand.slice(), pool2 = edges.slice();
+    for (let i = 0; i < Math.min(nPits, pool1.length); i++) { const [x, y] = pool1.splice((trnd() * pool1.length) | 0, 1)[0]; t.pit[y][x] = true; }
+    for (let i = 0; i < nWalls; i++) { const [k, x, y] = pool2.splice((trnd() * pool2.length) | 0, 1)[0]; (k === 'E' ? t.wallE : t.wallS)[y][x] = true; }
+    if (connectedFlags(t)) return t;
+  }
+  return { pit: mkFlags(), wallE: mkFlags(), wallS: mkFlags() };
+}
+const terrainSig = (t) => JSON.stringify([t.pit, t.wallE, t.wallS]);
+function applyTerrain(t, hall) {
+  finishMorph();
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { terrain.pit[y][x] = t.pit[y][x]; terrain.wallE[y][x] = t.wallE[y][x]; terrain.wallS[y][x] = t.wallS[y][x]; }
+  if (boardOld) return;
+  if (boardInfo) boardInfo.dispose();
+  boardInfo = buildBoard(hall, terrain);
+}
+function fadeSwap(fn) {                           // cheap transition: one shader uniform dips to black, the swap happens at the bottom
+  if (boardFade) boardFade.fn();
+  boardFade = { t: 0, phase: 0, fn };
+}
+function updateFade(rawDt) {
+  if (!boardFade) return; const f = boardFade; f.t += rawDt;
+  if (f.phase === 0) { fadeU.value = Math.min(1, f.t / 0.2); if (f.t >= 0.2) { f.fn(); f.phase = 1; f.t = 0; } }
+  else { fadeU.value = Math.max(0, 1 - f.t / 0.45); if (f.t >= 0.45) { fadeU.value = 0; boardFade = null; } }
+}
+const elStage = $('stage'), elCallout = $('callout');
+const stageLabel = () => 'RITE ' + roman(stage + 1);
+function showCallout(title, lines) {
+  elCallout.innerHTML = `<i>${title}</i>${lines.join('<br>')}`;
+  elCallout.animate([{ opacity: 0, transform: 'translate3d(-50%,10px,0)' }, { opacity: 1, transform: 'translate3d(-50%,0,0)', offset: 0.08 }, { opacity: 1, transform: 'translate3d(-50%,0,0)', offset: 0.9 }, { opacity: 0, transform: 'translate3d(-50%,-6px,0)' }], { duration: 6000, easing: 'ease-out' });
+}
+const ANNOUNCE = { 1: ['THE CHAINED ARRIVE', 'CHAINED DICE', ['BOUND IN IRON - THEY CANNOT MOVE.', 'MATCH THEM TO BREAK THEIR CHAINS.']],
+  2: ['THE SLIME SPREADS', 'SLIME DICE', ['THEY NEVER ROLL, ONLY SLIDE -', 'AND SLIDE UNTIL THEY HIT SOMETHING.']],
+  3: ['THE FLOOR OPENS', 'PITS', ['PITS SWALLOW THE FLOOR.', 'NO DIE MAY ENTER - THEY SHIFT EACH RITE.']],
+  4: ['THE WALLS RISE', 'WALLS', ['WALLS BLOCK ROLLS AND SLIDES', 'ACROSS THEIR EDGE.']],
+  5: ['THE TEMPLE AWAKENS', 'THE TWISTS MIX', ['THE GREY STONE TURNS TO MOSS AND ROOT.', 'EVERY TWIST NOW WALKS TOGETHER.']],
+  8: ['THE TEMPLE DARKENS', 'THE RITE QUICKENS', ['MOSS BURNS AWAY - BASALT RISES.', 'CHAINS, SLIME, PITS AND WALLS AT ONCE.', 'THE OFFERINGS COME FASTER.']] };
+function announceStage(n) {
+  const a = ANNOUNCE[n] || (n - 4 >= L_MAX ? ['THE RITE IS AT ITS PEAK', 'RITE ' + roman(n + 1), ['THE PITS AND WALLS SHIFT AGAIN.', 'HOLD THE LINE.']] : ['THE RITE DEEPENS', 'RITE ' + roman(n + 1), ['MORE CHAINS, MORE SLIME, MORE PITS AND WALLS.', 'THE OFFERINGS GROW BOLDER.']]);
+  toast(a[0], 'rite2'); showCallout(a[1], a[2]); defer(() => sfx('chant')); vib([30, 40, 60]); shake = Math.max(shake, 0.2);
+  breatherT = BREATHER; forceKind = n === 1 ? 'chained' : n === 2 ? 'slime' : null; spawnT = 0;
+  elStage.animate([{ transform: 'scale(1.9)', color: '#fff' }, { transform: 'scale(1)' }], { duration: 500, easing: 'ease-out' });
+}
+function setStage(n, announce) {
+  finishMorph();
+  const prevHall = boardInfo && boardInfo.V; stage = n; stageT = 0; stageScore0 = score; elStage.textContent = stageLabel();
+  const hall = hallFor(n);
+  if (boardOld) { applyTerrain(genTerrain(n), hall); }
+  else if (!boardInfo) applyTerrain(genTerrain(n), hall);                      // first build (or a restart / ?stage jump)
+  else if (prevHall !== hall && announce) startMorph(hall);                    // hall change: transform in place, terrain + dice untouched
+  else { const t = genTerrain(n), same = prevHall === hall && terrainSig(t) === terrainSig(terrain); if (!same) { if (announce) fadeSwap(() => applyTerrain(t, hall)); else applyTerrain(t, hall); } }
+  if (announce) announceStage(n);
+}
+function pickKind() {
+  const c = cfg(); if (forceKind) { const k = forceKind; forceKind = null; return k; }
+  if (!c.chained && !c.slime) return 'normal';
+  let nc = 0, ns = 0; for (const d of dice) { if (d.kind === 'chained') nc++; else if (d.kind === 'slime') ns++; }
+  const pC = c.chained ? Math.min(0.28, 0.10 + 0.03 * c.L) : 0, pS = c.slime ? Math.min(0.25, 0.09 + 0.03 * c.L) : 0, r = rnd();
+  if (r < pC && nc < Math.min(6, 3 + (c.L >> 1))) return 'chained';
+  if (r >= pC && r < pC + pS && ns < Math.min(5, 2 + (c.L >> 1))) return 'slime';
+  return 'normal';
+}
+function breakChains(d) { if (d.kind !== 'chained') return; d.kind = 'normal'; d.mesh.geometry = dieGeos.normal; burst(d.mesh.position.x, H, d.mesh.position.z, 6, 0.8); defer(() => sfx('clack', 1.9)); }
 const SPAWN_FAST = 0.83;      // 17% faster than the previous pacing (was max(2.6, 5.1-0.04n))
-const spawnInterval = () => Math.max(2.6 * SPAWN_FAST, (5.1 - spawnCount * 0.04) * SPAWN_FAST);
-const emptyTiles = () => { const r = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x]) r.push([x, y]); return r; };
+const spawnInterval = () => { const c = cfg(), base = Math.max(2.6 * SPAWN_FAST, (5.1 - spawnCount * 0.04) * SPAWN_FAST); return Math.max(1.5, base * (1 - 0.05 * c.L) * (c.quick ? 0.9 : 1)) * (breatherT > 0 ? 1.7 : 1); };   // late game: up to ~37% faster, never under 1.5s; breather: 70% slower
+const emptyTiles = () => { const r = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!grid[y][x] && !terrain.pit[y][x]) r.push([x, y]); return r; };
 
 function spawnDie(delay = 0) {
   const e = emptyTiles(); if (!e.length) return null;
@@ -928,7 +1110,7 @@ function spawnDie(delay = 0) {
   let q, tries = 0;
   do { q = randomQuat(); tries++; } while (tries < 12 && nbDice(x, y).some((d) => d.top === topOf(q)));
   spawnCount++;
-  return makeDie(x, y, q, delay);
+  return makeDie(x, y, q, delay, pickKind());
 }
 function resetGame() {
   commitBest();
@@ -936,7 +1118,7 @@ function resetGame() {
   chains = [];
   clearParticles();
   for (const el of popEls) { if (el._a) el._a.cancel(); el.style.opacity = 0; }
-  score = 0; shownScore = 0; spawnT = 0; spawnCount = 0; gameOver = false; freezeT = 0; shake = 0; comboIdle = 0; runStartBest = best;
+  score = 0; shownScore = 0; breatherT = 0; forceKind = null; if (boardFade) { boardFade.fn(); boardFade = null; fadeU.value = 0; } finishMorph(); setStage(startStage, false); spawnT = 0; spawnCount = 0; gameOver = false; freezeT = 0; shake = 0; comboIdle = 0; runStartBest = best;
   setCombo(0); $('over').classList.remove('show'); $('confetti').innerHTML = ''; renderScore(false); setMeter(0);
   cancelDrag();
   for (let i = 0; i < 7; i++) spawnDie(i * 0.12);
@@ -951,7 +1133,7 @@ function countUp(el, to, ms, withTicks) {
   }, 40);
 }
 function endGame() {
-  gameOver = true; sfx('over'); vib([80, 40, 160]);
+  gameOver = true; sfx('over'); vib([80, 40, 160]); $('sub').textContent = 'THE BOARD IS FULL - ' + stageLabel();
   const isNew = score > 0 && score > runStartBest; commitBest();
   $('overScore').innerHTML = fmt6(0); countUp($('overScore'), score, 900, true);
   $('overBest').innerHTML = fmt6(best);
@@ -972,9 +1154,10 @@ function startGame() {
 
 /* ---------- rolling ---------- */
 function tryRoll(d, dir, slide) {
-  if (!d || d.state !== 'idle' || gameOver) return false;
+  if (!d || d.state !== 'idle' || gameOver || d.kind === 'chained') return false;       // chained dice cannot be moved at all
+  if (d.kind === 'slime') { slide = true; d.slimeDir = dir; }                           // slime cannot rotate: it always slides (and keeps going, see landed)
+  if (!canStep(d.gx, d.gy, dir[0], dir[1])) { d.slimeDir = null; return false; }
   const tx = d.gx + dir[0], ty = d.gy + dir[1];
-  if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) return false;
   grid[d.gy][d.gx] = null; grid[ty][tx] = d;
   d.fromX = d.gx; d.fromY = d.gy; d.gx = tx; d.gy = ty;
   d.state = 'rolling'; d.slide = !!slide; d.t = 0; d.axis = new THREE.Vector3(dir[1], 0, -dir[0]); d.q0 = d.mesh.quaternion.clone();
@@ -986,6 +1169,8 @@ function tryRoll(d, dir, slide) {
 function landed(d) {
   d.state = 'idle'; d.bounce = 0;
   d.top = topOf(d.mesh.quaternion);
+  if (d.kind === 'slime' && d.slimeDir && canStep(d.gx, d.gy, d.slimeDir[0], d.slimeDir[1])) { tryRoll(d, d.slimeDir, true); return; }   // keeps gliding until it hits something
+  d.slimeDir = null;
   sfx('clack', 0.9 + d.top * 0.04);
   evaluate();
 }
@@ -1008,7 +1193,7 @@ function evaluate() {
         for (const c of cs) if (c !== chain) { dice.forEach((x) => { if (x.chain === c) x.chain = chain; }); chains.splice(chains.indexOf(c), 1); }
         chain.dur = Math.min(chain.dur + JOIN_EXT, chain.t + MAX_REMAIN);
       } else { chain = { t: 0, dur: SINK_T }; chains.push(chain); }
-      idle.forEach((x) => { x.state = 'sinking'; x.chain = chain; x.shown = 0; x.flash = sinkers.length ? 1 : 0; x.mesh.scale.set(1, 1, 1); });
+      idle.forEach((x) => { breakChains(x); x.state = 'sinking'; x.chain = chain; x.shown = 0; x.flash = sinkers.length ? 1 : 0; x.mesh.scale.set(1, 1, 1); });
       events++; lastGroup = { comp, joined: anySink, n: d.top };
       setCombo(combo + 1); comboIdle = 0;
       const c = new THREE.Vector3(); comp.forEach((x) => c.add(x.mesh.position)); c.multiplyScalar(1 / comp.length); c.y += 0.7;
@@ -1025,7 +1210,7 @@ function evaluate() {
 const _rc = new THREE.Vector3();
 function wipeOnes(ones) {
   ones.sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy));
-  ones.forEach((d, i) => { d.state = 'vanishing'; d.delay = i * 0.1; d.pitchIdx = i; d.mesh.scale.set(1, 1, 1); d.flash = 1; igniteSigil(d.gx, d.gy, i * 0.1); });
+  ones.forEach((d, i) => { breakChains(d); d.state = 'vanishing'; d.delay = i * 0.1; d.pitchIdx = i; d.mesh.scale.set(1, 1, 1); d.flash = 1; igniteSigil(d.gx, d.gy, i * 0.1); });
   setCombo(combo + 1); comboIdle = 0;
   freezeT = 0.14; shake = 0.25; riteT = 0;
   toast('SACRIFICE!', 'wipe'); sfx('rumble'); vib([60, 30, 120]);
@@ -1081,10 +1266,10 @@ function updateLabels(force) {
   if (!force && nw - labelT < 120 && d && drag.labelDie === d && drag.labelMode === drag.mode) return;   // numbers only need refreshing a few times a second
   labelT = nw; if (drag) { drag.labelDie = d; drag.labelMode = drag.mode; }
   for (const k in labels) labels[k].visible = false;
-  if (!d || d.state !== 'idle' || drag.mode === 'slide') return;
+  if (!d || d.state !== 'idle' || drag.mode === 'slide' || d.kind !== 'normal') return;
   for (const k in labels) {
     const dd = DIR4[k], tx = d.gx + dd[0], ty = d.gy + dd[1];
-    if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) continue;
+    if (!canStep(d.gx, d.gy, dd[0], dd[1])) continue;
     const top = topOf(rollQuat(d.mesh.quaternion, dd)), hot = wouldMatch(d, tx, ty, top);
     labels[k].material.map = digits[top][hot ? 1 : 0]; labels[k].material.opacity = hot ? 0.85 : 0.55;
     labels[k].position.set(wx(tx), H + 0.35, wx(ty)); labels[k].visible = true;
@@ -1096,14 +1281,15 @@ function updateGhost() {
   const d = drag.die; const vx = drag.cx - drag.x0, vy = drag.cy - drag.y0;
   if (d.state !== 'idle' || Math.hypot(vx, vy) < TILE_PX) { ghost.visible = false; tgtRing.visible = false; drag.dir = null; drag.gkey = ''; return; }
   if (!drag.mode) drag.mode = 'roll';
-  const slide = drag.mode === 'slide';
+  const slide = drag.mode === 'slide' || d.kind === 'slime';
   const dir = dirFromDrag(d, vx, vy); drag.dir = dir;
   const gk = d.id + (slide ? 's' : 'r') + dir[0] + ',' + dir[1], nw = performance.now();
   if (gk === drag.gkey && nw - drag.gt < 120) return;      // same preview as a moment ago: nothing to redo
   drag.gkey = gk; drag.gt = nw; ghost.visible = false; tgtRing.visible = false;
-  const tx = d.gx + dir[0], ty = d.gy + dir[1];
-  if (tx < 0 || ty < 0 || tx >= N || ty >= N || grid[ty][tx]) { drag.blocked = true; return; }
+  if (d.kind === 'chained' || !canStep(d.gx, d.gy, dir[0], dir[1])) { drag.blocked = true; return; }
   drag.blocked = false;
+  let [tx, ty] = [d.gx + dir[0], d.gy + dir[1]];
+  if (d.kind === 'slime') [tx, ty] = slideDest(d, dir);                  // preview where the slime will actually stop
   const q = slide ? d.mesh.quaternion.clone() : rollQuat(d.mesh.quaternion, dir), top = slide ? d.top : topOf(q);
   ghost.quaternion.copy(q); ghost.position.set(wx(tx), H, wx(ty)); ghost.visible = true;
   const hot = wouldMatch(d, tx, ty, top);
@@ -1241,6 +1427,12 @@ function update(rawDt) {
     if (spawnT >= spawnInterval()) { spawnT = 0; if (emptyTiles().length) spawnDie(); }
     setMeter(spawnT / spawnInterval());
   }
+  if (!gameOver && started) {                 // endless mode clock: time OR score milestones bring the next twist
+    stageT += dt; if (breatherT > 0) breatherT = Math.max(0, breatherT - dt);
+    const due = stage < 5 ? (stageT >= STAGE_DUR || score >= STAGE_SCORE[stage]) : (stageT >= LATE_DUR || score - stageScore0 >= LATE_SCORE);
+    if (due && !boardFade) setStage(stage + 1, true);
+  }
+  updateFade(rawDt); updateMorph(rawDt);
   let sinkingOrVanish = false;
   for (let i = 0; i < chains.length; i++) chains[i].t += dt;
   tmpDice.length = 0; for (let i = 0; i < dice.length; i++) tmpDice.push(dice[i]);
@@ -1253,7 +1445,7 @@ function update(rawDt) {
       m.position.set(px + (t < 1 ? Math.sin(t * 40) * 0.015 * (1 - t) : 0), -S + (H + S) * e, pz);
       if (t >= 1) { d.state = 'idle'; d.bounce = 0; m.position.set(px, H, pz); sfx('tick', 0.7); evaluate(); }
     } else if (d.state === 'rolling') {
-      d.t = Math.min(1, d.t + dt / ROLL_T);
+      d.t = Math.min(1, d.t + dt / (d.kind === 'slime' ? ROLL_T * 0.72 : ROLL_T));
       const fx = wx(d.fromX), fz = wx(d.fromY);
       if (d.slide) {   // slide: glide one tile, top face untouched, die stays lifted then drops
         const tt = d.t, e = tt * tt * (3 - 2 * tt), k = Math.min(1, Math.max(0, (tt - 0.55) / 0.45));
@@ -1309,7 +1501,7 @@ function update(rawDt) {
   // combo decay
   if (combo > 0) { if (sinkingOrVanish || chains.length) comboIdle = 0; else { comboIdle += dt; if (comboIdle > 1.4) setCombo(0); } }
   // board-full check
-  if (!gameOver && dice.length === N * N && dice.every((d) => d.state === 'idle')) endGame();
+  if (!gameOver && dice.length >= playableCount() && dice.every((d) => d.state === 'idle')) endGame();
   // score count-up
   if (shownScore !== score) {
     shownScore += Math.max(1, Math.ceil((score - shownScore) * 0.2)); if (shownScore > score) shownScore = score;
@@ -1407,18 +1599,24 @@ function prewarm() {
 }
 layout(); setView(view, true); renderScore(false); resetGame(); if (fxLevel > 0) setFx(fxLevel, false);
 prewarm();
+if (!boardVar && !boardOld) ['a', 'b', 'c'].forEach((v, i) => setTimeout(() => { try { const A = boardAssets(v); renderer.initTexture(A.tex); renderer.initTexture(A.gtex); } catch (e) { console.error(e); } }, 900 + i * 500));   // paint + upload the other halls while the title screen is up
 requestAnimationFrame(frame);
 
 /* ---------- debug / test hooks ---------- */
 window.__game = {
   THREE,
   get dice() { return dice.map((d) => ({ gx: d.gx, gy: d.gy, top: d.top, state: d.state })); },
+  get stage() { return stage; }, get stageInfo() { const c = cfg(); return { stage, label: stageLabel(), ...c, hall: boardInfo && boardInfo.V, stageT, breather: breatherT, interval: spawnInterval() }; },
+  setStage(n, announce = true) { setStage(n, announce); }, addStageTime(sec) { stageT += sec; }, get playable() { return playableCount(); },
+  get terrain() { const pits = [], walls = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (terrain.pit[y][x]) pits.push([x, y]); if (terrain.wallE[y][x]) walls.push([x, y, 'e']); if (terrain.wallS[y][x]) walls.push([x, y, 's']); } return { pits, walls }; },
+  setTerrain(pits, walls) { const t = { pit: mkFlags(), wallE: mkFlags(), wallS: mkFlags() }; for (const [x, y] of pits || []) t.pit[y][x] = true; for (const [x, y, k] of walls || []) (k === 'e' ? t.wallE : t.wallS)[y][x] = true; applyTerrain(t, boardInfo ? boardInfo.V : hallFor(stage)); },
+  kindAt(gx, gy) { const d = grid[gy][gx]; return d ? d.kind : null; }, forceSpawn(kind) { forceKind = kind || null; return !!spawnDie(0); }, get breather() { return breatherT; }, get morphing() { return !!morph; }, get hall() { return boardInfo && boardInfo.V; },
   get boardVar() { return boardVar; }, get boardInfo() { return boardInfo && { tris: boardInfo.tris, gtris: boardInfo.gtris }; },
   get riteDark() { return riteU.value; }, get sigilsLive() { return sigils.filter((q) => q.on).length; }, get res() { return [resU.value.x, resU.value.y]; },
   get score() { return score; }, get combo() { return combo; }, get over() { return gameOver; }, get spawnCount() { return spawnCount; },
   tileToScreen(gx, gy) { const r = app.getBoundingClientRect(); const p = new THREE.Vector3(wx(gx), H, wx(gy)).project(camera); return { x: r.left + (p.x * .5 + .5) * r.width, y: r.top + (-p.y * .5 + .5) * r.height }; },
   clear() { for (const d of [...dice]) removeDie(d); },
-  place(gx, gy, top) { const d = makeDie(gx, gy, randomQuat(top), 0); d.t = 1; d.state = 'idle'; d.bounce = 1; d.mesh.position.set(wx(gx), H, wx(gy)); return d.top; },
+  place(gx, gy, top, kind = 'normal') { const d = makeDie(gx, gy, randomQuat(top), 0, kind); d.t = 1; d.state = 'idle'; d.bounce = 1; d.mesh.position.set(wx(gx), H, wx(gy)); return d.top; },
   freezeSpawns(v) { this._noSpawn = v; spawnT = v ? -1e9 : 0; },
   topAt(gx, gy) { const d = grid[gy][gx]; return d ? d.top : null; },
   stateAt(gx, gy) { const d = grid[gy][gx]; return d ? d.state : null; },

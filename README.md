@@ -14,7 +14,22 @@ When ready: Railway → service → Settings → Networking → **+ Custom Domai
 2. `TXT` – name/value exactly as Railway displays (domain-ownership verification).
 Optional: `CNAME www` → `die-rite.com` (or its own Railway target) plus a redirect www → apex. If Cloudflare proxying (orange cloud) is on, set SSL/TLS mode to **Full** (not Strict). SSL (Let's Encrypt) is issued automatically within about an hour of the records resolving.
 
-## Board drafts (branch board-drafts, not deployed)
-`?board=a|b|c` swaps in a stone-tile board + themed border (`&nodemo` hides the example pit + wall). Data-driven via `layout` (tile/pit) and `walls` (edge segments) inside `buildBoard()`.
+## Endless mode (RITE I, II, III ...)
+Bone dice (`?dice=classic` for the old ones, `?pipglow=1` makes only the pips glow while sinking) on a stone board. A new twist arrives every 150s (or at 1500/3500/6000/9000/12500 score), one at a time, each with a callout and a ~13s calmer breather:
 
-`?dice=bone` (draft, board-drafts branch): rounded bone dice (same single draw call); `&pipglow=1` makes only the pips glow while sinking.
+| Rite | Arrives (time / score) | Twist | Hall |
+|---|---|---|---|
+| I | start | the game as before | A grey stone |
+| II | 2:30 / 1500 | chained dice (immovable, match + sink normally, sinking frees them) | A |
+| III | 5:00 / 3500 | slime dice (never roll, only slide until they hit something) | A |
+| IV | 7:30 / 6000 | pits (no entry, spawns avoid them, shift each rite) | A |
+| V | 10:00 / 9000 | walls on tile edges (block rolls/slides, not matches) | A |
+| VI | 12:30 / 12500 | the twists mix; ramp begins | A morphs to C (mossy temple) in place |
+| VII-VIII | every 2:00 / +4000 | ramp: more chained/slime/pits/walls, faster spawns | C |
+| IX | 18:30 | second escalation: faster spawns | C morphs to B (dark basalt) |
+| X+ | every 2:00 | ramp to its cap (rite XI), then terrain just shifts | B |
+
+Caps: chained <=6, slime <=5, pits <=5, walls <=8, spawn interval >=1.5s. Hall changes are an in-place morph (a wave of tiles swapping, dice/pits/walls untouched). Debug: `?stage=N`, plus `__game.setStage / addStageTime / setTerrain / place(gx,gy,top,kind)` hooks. Tests: `test.py` (core) and `test_endless.py URL VW VH [shots]` (endless rules).
+
+## Board drafts
+`?board=a|b|c` pins one hall for the whole run (and disables the hall change).
