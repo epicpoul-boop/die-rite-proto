@@ -193,6 +193,12 @@ async def main():
         await page.click('#view'); await page.wait_for_timeout(600); check('VIEW button toggles to iso', await page.evaluate('__game.view')=='iso' and (await page.inner_text('#viewLbl'))=='ISO')
         sc = await page.evaluate('[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.innerWidth, window.innerHeight]')
         check('no page scroll overflow', sc[0]<=sc[2] and sc[1]<=sc[3], str(sc))
+        # auto quality: a janky main thread must step the effects level down
+        await page.evaluate('__game.setFx(0,false)')
+        await page.evaluate('window.__iv=setInterval(()=>{const t=performance.now();while(performance.now()-t<45);},60)')
+        await page.wait_for_timeout(9000)
+        fxn = await page.evaluate('__game.fx'); check('auto quality steps down on a janky main thread', fxn>=1, f'fx={fxn}')
+        await page.evaluate('clearInterval(window.__iv)')
         await b.close()
     check('no console errors/warnings', not errors, '; '.join(errors)[:600])
     print('FAILED' if any(not r[1] for r in results) else 'ALL OK')

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0612">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="build" content="20261103-075030">
+<meta name="build" content="20261103-080640">
 <title>DEADROLL – dice prototype</title>
 <style>
   /* Press Start 2P (c) 2012 The Press Start 2P Project Authors, SIL Open Font License 1.1 — embedded below as base64 woff2 (latin subset). */
@@ -71,10 +71,11 @@
   #toast.t3{color:var(--gold);text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 var(--red),5px 5px 0 #000}
   #toast.wipe{color:var(--cy);text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,3px 3px 0 #0a5a7a,5px 5px 0 #000}
   #toast{will-change:transform,opacity}
-  .pop{position:absolute;left:0;top:0;opacity:0;font-size:12px;line-height:12px;color:var(--gold);white-space:nowrap;z-index:22;pointer-events:none;
+  .pop{will-change:transform,opacity;contain:layout paint style;position:absolute;left:0;top:0;opacity:0;font-size:12px;line-height:12px;color:var(--gold);white-space:nowrap;z-index:22;pointer-events:none;
     text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000,2px 2px 0 #000}
   .pop.big{font-size:16px;color:#fff;text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000,2px 2px 0 var(--red)}
   .pop.chain{color:var(--cy)}
+  .pop.cheap{text-shadow:1px 1px 0 #000,-1px -1px 0 #000}   /* when several popups overlap: lighter outline */
   #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:21}
 
   /* ---- in-game hint ---- */
@@ -123,6 +124,7 @@
   .lowfx .pop,.lowfx #toast{text-shadow:2px 2px 0 #000}
   .lowfx #confetti,.lowfx #flash{display:none}
   .lowfx .ibtn,.lowfx .bigbtn{background-image:none}
+  .lowfx2 #toast{will-change:auto}
   #load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim)}
 </style>
 </head>
@@ -188,7 +190,9 @@ const HOLD_MS = 250;         // press-and-hold time that switches to slide mode
 const TILE_PX = 12;          // drag threshold in px
 const TARGET_W = 320;        // low-res render width
 const params = new URLSearchParams(location.search);
-let fxLevel = params.has('lowfx') ? 1 : 0;   // 0 = full effects, 1 = low-cost path (auto-switched on slow devices)
+let fxLevel = params.has('lowfx') ? 1 : 0;   // 0 = full effects, 1 = low-cost, 2 = lowest (auto-stepped down on slow devices, remembered)
+if (params.has('hifx')) { try { localStorage.removeItem('deadroll-fx'); } catch (e) { } }
+else if (!params.has('lowfx')) { try { fxLevel = Math.min(1, parseInt(localStorage.getItem('deadroll-fx') || '0') || 0); } catch (e) { } }
 let seed = params.has('seed') ? parseInt(params.get('seed')) >>> 0 : (Math.random() * 2 ** 32) >>> 0;
 function rnd() { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
 
@@ -216,11 +220,8 @@ const postMat = new THREE.ShaderMaterial({
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform vec2 uRes; varying vec2 vUv;
-    float bayer(vec2 p){
-      int x=int(mod(p.x,4.)); int y=int(mod(p.y,4.));
-      float m[16]=float[16](0.,8.,2.,10., 12.,4.,14.,6., 3.,11.,1.,9., 15.,7.,13.,5.);
-      return m[y*4+x]/16.-0.5;
-    }
+    float m2(vec2 p){ return p.x*2.+p.y*3.-4.*p.x*p.y; }          // 2x2 Bayer cell {0,2,3,1}
+    float bayer(vec2 p){ return (4.*m2(mod(p,2.)) + m2(mod(floor(p*.5),2.)))/16.-0.5; }   // 4x4 Bayer without a lookup array
     void main(){
       vec3 c=texture2D(tDiffuse,vUv).rgb;
       c=(c-0.5)*1.06+0.5;
@@ -389,19 +390,24 @@ const selRing = ringPlane(0xffffff), tgtRing = ringPlane(0x40e8ff);
 
 /* ---------- particles ---------- */
 const partGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
-const partMats = [0xd9ccaa, 0xff7a3a, 0xc3162a, 0x8a5ad0].map((c) => psx(new THREE.MeshBasicMaterial({ color: c })));
-const PMAX = 64, pool = [];   // fixed pool: meshes are created once and recycled
-for (let i = 0; i < PMAX; i++) { const m = new THREE.Mesh(partGeo, partMats[i % partMats.length]); m.visible = false; scene.add(m); pool.push({ m, on: false, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, life: 0 }); }
+const PMAX = 64, pool = [];   // fixed pool, rendered as ONE instanced mesh (one draw call however many sparks)
+const partMesh = new THREE.InstancedMesh(partGeo, psx(new THREE.MeshBasicMaterial({ color: 0xffffff })), PMAX);
+partMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); partMesh.frustumCulled = false; partMesh.visible = false;
+const _pd = new THREE.Object3D(), _pc = new THREE.Color(), PCOLS = [0xd9ccaa, 0xff7a3a, 0xc3162a, 0x8a5ad0];
+_pd.scale.set(0, 0, 0); _pd.updateMatrix();
+for (let i = 0; i < PMAX; i++) { partMesh.setMatrixAt(i, _pd.matrix); partMesh.setColorAt(i, _pc.setHex(PCOLS[i % 4])); pool.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, ax: 0, ay: 0, rx: 0, ry: 0, sc: 1, life: 0 }); }
+scene.add(partMesh);
 let pCursor = 0, pLive = 0;
 function burst(x, y, z, n, upward = 1) {
   if (fxLevel > 0) n = Math.ceil(n * 0.5);
   for (let i = 0; i < n; i++) {
     const p = pool[pCursor++ % PMAX]; if (!p.on) pLive++;
-    p.on = true; p.life = .6 + Math.random() * .4; p.m.visible = true; p.m.position.set(x, y, z); p.m.scale.setScalar(.6 + Math.random());
+    p.on = true; p.life = .6 + Math.random() * .4; p.x = x; p.y = y; p.z = z; p.sc = .6 + Math.random(); p.ax = p.ay = 0;
     p.vx = (Math.random() - .5) * 3.2; p.vy = (1.5 + Math.random() * 3) * upward; p.vz = (Math.random() - .5) * 3.2; p.rx = Math.random() * 9; p.ry = Math.random() * 9;
   }
+  partMesh.visible = true;
 }
-function clearParticles() { for (const p of pool) { p.on = false; p.m.visible = false; } pLive = 0; }
+function clearParticles() { pool.forEach((p, i) => { p.on = false; partMesh.setMatrixAt(i, _pd.matrix); }); partMesh.instanceMatrix.needsUpdate = true; pLive = 0; partMesh.visible = false; }
 
 /* ---------- audio ---------- */
 let ac = null, noiseBuf = null, muted = false;
@@ -507,6 +513,8 @@ function toast(txt, kind) {
   const k = (o, sc, ty) => ({ opacity: o, transform: `scale(${sc}) translateY(${ty || 0}px)`, easing: 'steps(1)' });
   elToast.animate([{ ...k(1, 2.2), offset: 0 }, { ...k(1, .85), offset: .08 }, { ...k(1, 1.12), offset: .16 }, { ...k(1, 1), offset: .24 }, { ...k(1, 1), offset: .78 }, { ...k(0, 1), offset: .85 }, { ...k(1, 1), offset: .92 }, { ...k(0, 1, -12), offset: 1 }], { duration: 1150, fill: 'none' });
 }
+const deferred = [];            // non-visual work (sound, haptics, popups, banners) runs one item per frame
+const defer = (fn) => { deferred.push(fn); };
 let appRect = app.getBoundingClientRect();
 const POPN = 10, popEls = [], _pp = new THREE.Vector3(); let popI = 0;
 for (let i = 0; i < POPN; i++) { const el = document.createElement('div'); el.className = 'pop'; $('hud').appendChild(el); popEls.push(el); }
@@ -514,7 +522,8 @@ function popup(txt, pos, cls = '') {
   _pp.copy(pos).project(camera);
   const x = Math.round((_pp.x * .5 + .5) * appRect.width), y = Math.round((-_pp.y * .5 + .5) * appRect.height);
   const el = popEls[popI++ % POPN]; if (el._a) el._a.cancel();
-  el.className = 'pop ' + cls; el.textContent = txt;
+  let run = 0; for (let i = 0; i < POPN; i++) { const a = popEls[i]._a; if (a && a.playState === 'running') run++; }
+  el.className = 'pop ' + cls + (run >= 3 || fxLevel > 0 ? ' cheap' : ''); if (el.textContent !== txt) el.textContent = txt;
   const tr = (yy) => `translate(${x}px,${yy}px) translate(-50%,-50%)`;
   el._a = el.animate([{ transform: tr(y), opacity: 1 }, { transform: tr(y - 36), opacity: 1, offset: 0.7 }, { transform: tr(y - 52), opacity: 0 }], { duration: 900, easing: 'steps(9)', fill: 'forwards' });
 }
@@ -611,9 +620,10 @@ function evaluate() {
       events++; lastGroup = { comp, joined: anySink, n: d.top };
       setCombo(combo + 1); comboIdle = 0;
       const c = new THREE.Vector3(); comp.forEach((x) => c.add(x.mesh.position)); c.multiplyScalar(1 / comp.length); c.y += 0.7;
-      sfx('chime', pitchFor(combo - 1)); vib([18, 25, 40]);
-      popup(lastGroup.joined ? `CHAIN +${idle.length}` : `${d.top}s x${comp.length}`, c, lastGroup.joined ? 'chain' : '');
-      if (combo >= 3) toast(combo >= 6 ? 'MEGA COMBO!' : 'COMBO x' + combo);
+      { const cp = pitchFor(combo - 1), ptxt = lastGroup.joined ? `CHAIN +${idle.length}` : `${d.top}s x${comp.length}`, pcls = lastGroup.joined ? 'chain' : '', cc = c.clone(), cb = combo;
+        defer(() => { sfx('chime', cp); vib([18, 25, 40]); });
+        defer(() => popup(ptxt, cc, pcls));
+        if (cb >= 3) defer(() => toast(cb >= 6 ? 'MEGA COMBO!' : 'COMBO x' + cb)); }
     }
   }
   // 1s rule: a 1 touching a sinking chain wipes every 1 on the board
@@ -796,7 +806,7 @@ function setView(v, instant) {
 $('view').addEventListener('click', () => { audioInit(); setView(view === 'iso' ? 'flat' : 'iso'); sfx('tick', 1.4); });
 function layout() {
   const r = app.getBoundingClientRect(); appRect = r; const W = Math.max(1, r.width), Ht = Math.max(1, r.height);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, fxLevel > 0 ? 1 : 2)); renderer.setSize(W, Ht, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, [2, 1.25, 1][fxLevel])); renderer.setSize(W, Ht, false);
   const tw = TARGET_W, th = Math.round(TARGET_W * Ht / W);
   rt.setSize(tw, th); snapU.value.set(tw, th);
   camera.aspect = W / Ht; camera.fov = 38;
@@ -890,9 +900,10 @@ function update(rawDt) {
       setGlow(d, pulse, 1);
       if (d.delay <= 0) {
         const pts = d.chainPop ? 10 * d.top * Math.max(1, combo) : 25 * Math.max(1, combo); score += pts; comboIdle = 0;
-        popup('+' + pts, new THREE.Vector3(px, d.chainPop ? 0.5 : 0.9, pz), d.chainPop ? '' : 'big');
-        if (d.chainPop) { burst(px, 0.1, pz, 8, 0.6); vib(22); } else { burst(px, H, pz, 12, 1); vib(18); }
-        sfx('pop', pitchFor(d.chainPop ? Math.min(combo, 8) + d.pitchIdx : d.pitchIdx));
+        const pv = new THREE.Vector3(px, d.chainPop ? 0.5 : 0.9, pz), pcls2 = d.chainPop ? '' : 'big', pp = pitchFor(d.chainPop ? Math.min(combo, 8) + d.pitchIdx : d.pitchIdx), loud = !d.chainPop || d.pitchIdx < 4;
+        defer(() => popup('+' + pts, pv, pcls2));
+        if (d.chainPop) burst(px, 0.1, pz, 8, 0.6); else { burst(px, H, pz, 12, 1); if (d.pitchIdx < 3) vib(18); }
+        if (loud) defer(() => sfx('pop', pp));
         removeDie(d);
       }
     }
@@ -900,6 +911,7 @@ function update(rawDt) {
   for (let ci = chains.length - 1; ci >= 0; ci--) { const c = chains[ci]; if (c.t < c.dur) continue;
     chains.splice(chains.indexOf(c), 1);
     dice.filter((x) => x.chain === c && x.state === 'sinking').forEach((x, i) => { x.state = 'vanishing'; x.chainPop = true; x.delay = i * 0.07; x.pitchIdx = i; });
+    vib([22, 30, 22, 30, 30]);      // one haptic pattern for the whole chain, not one call per die
   }
   // combo decay
   if (combo > 0) { if (sinkingOrVanish || chains.length) comboIdle = 0; else { comboIdle += dt; if (comboIdle > 1.4) setCombo(0); } }
@@ -911,16 +923,21 @@ function update(rawDt) {
     const nowT = performance.now();
     if (nowT - lastScoreDom > 50 || shownScore === score) {          // DOM at ~20 Hz, not every frame
       lastScoreDom = nowT; renderScore(false);
-      if (nowT - lastCountTick > 55) { lastCountTick = nowT; sfx('count', 1 + Math.min(0.8, combo * 0.08)); elScore.animate(UP_KF, { duration: 160, easing: 'steps(2)' }); }
+      if (nowT - lastCountTick > 70) { if (nowT - lastCountTick > 400) elScore.animate(UP_KF, { duration: 160, easing: 'steps(2)' }); lastCountTick = nowT; sfx('count', 1 + Math.min(0.8, combo * 0.08)); }
     }
   }
-  // particles (pooled)
-  if (pLive > 0) for (let i = 0; i < PMAX; i++) {
-    const p = pool[i]; if (!p.on) continue;
-    p.life -= rawDt; p.vy -= 9 * rawDt; const m = p.m;
-    m.position.x += p.vx * rawDt; m.position.y += p.vy * rawDt; m.position.z += p.vz * rawDt; m.rotation.x += p.rx * rawDt; m.rotation.y += p.ry * rawDt;
-    if (p.life <= 0) { p.on = false; m.visible = false; pLive--; }
+  // particles (pooled, instanced)
+  if (pLive > 0) {
+    for (let i = 0; i < PMAX; i++) {
+      const p = pool[i]; if (!p.on) continue;
+      p.life -= rawDt; p.vy -= 9 * rawDt; p.x += p.vx * rawDt; p.y += p.vy * rawDt; p.z += p.vz * rawDt; p.ax += p.rx * rawDt; p.ay += p.ry * rawDt;
+      if (p.life <= 0) { p.on = false; pLive--; partMesh.setMatrixAt(i, _pd.matrix); continue; }
+      _pd.position.set(p.x, p.y, p.z); _pd.rotation.set(p.ax, p.ay, 0); _pd.scale.setScalar(p.sc); _pd.updateMatrix(); partMesh.setMatrixAt(i, _pd.matrix);
+    }
+    partMesh.instanceMatrix.needsUpdate = true;
+    if (pLive === 0) { _pd.scale.set(0, 0, 0); _pd.updateMatrix(); partMesh.visible = false; }
   }
+  if (deferred.length) { const fn = deferred.shift(); try { fn(); } catch (e) { console.error(e); } }
   // selection ring pulse
   if (selRing.visible) { const s = 1 + 0.05 * Math.sin(simTime * 12); selRing.scale.set(s, s, s); }
   if (tgtRing.visible) { const s = 1 + 0.07 * Math.sin(simTime * 14); tgtRing.scale.set(s, s, s); }
@@ -953,16 +970,28 @@ function setGlow(d, amt, white) {
 
 /* ---------- main loop ---------- */
 let last = performance.now();
+let perfEl = null, perfN = 0, perfMax = 0, perfT = 0;
+if (params.has('perf')) { perfEl = document.createElement('div'); perfEl.style.cssText = 'position:absolute;left:4px;bottom:2px;z-index:99;font:9px monospace;color:#0f0;background:rgba(0,0,0,.6);padding:2px 4px;pointer-events:none'; app.appendChild(perfEl); }
 const perf = { cpu: new Float32Array(300), n: 0, calls: 0, tris: 0, programs: 0, geoms: 0, texs: 0, maxCpu: 0 };
 renderer.info.autoReset = false;
-let emaDt = 16.7, slowFrames = 0, playMs = 0;
-function setFx(level) { fxLevel = level; app.classList.toggle('lowfx', level > 0); layout(); }
+let emaDt = 16.7, slowFrames = 0, playMs = 0, lastFxStep = 0; const jank = [];
+function setFx(level, remember) {
+  fxLevel = level; app.classList.toggle('lowfx', level > 0); app.classList.toggle('lowfx2', level > 1);
+  dust.visible = level < 2; shards.forEach((m) => { m.visible = level < 2; }); layout();
+  if (remember) { try { localStorage.setItem('deadroll-fx', String(level)); } catch (e) { } }
+}
+function fxMonitor(now, rawMs) {          // auto quality: step down (and remember) when frames are slow or janky
+  if (!started || document.hidden || rawMs > 400 || fxLevel >= 2 || params.has('hifx')) return;
+  emaDt += (rawMs - emaDt) * 0.06; playMs += rawMs;
+  if (rawMs > 34) jank.push(now); while (jank.length && now - jank[0] > 3000) jank.shift();
+  if (playMs < 2500 || now - lastFxStep < 2500) return;
+  if (emaDt > 19.5) slowFrames++; else slowFrames = Math.max(0, slowFrames - 2);
+  if (slowFrames > 45 || jank.length >= 5) { lastFxStep = now; slowFrames = 0; jank.length = 0; emaDt = 16.7; setFx(fxLevel + 1, true); console.info('deadroll: quality step ->', fxLevel); }
+}
 function frame(now) {
   const rawMs = now - last, dt = Math.min(0.05, rawMs / 1000); last = now;
-  if (started && !document.hidden && rawMs < 250 && fxLevel === 0 && !params.has('hifx')) {   // auto low-cost path: sustained <~38 fps after warm-up
-    emaDt += (rawMs - emaDt) * 0.05; playMs += rawMs;
-    if (playMs > 5000) { if (emaDt > 26) slowFrames++; else slowFrames = Math.max(0, slowFrames - 2); if (slowFrames > 120) { setFx(1); console.info('deadroll: low-cost effects enabled'); } }
-  }
+  fxMonitor(now, rawMs);
+  if (perfEl) { perfN++; perfMax = Math.max(perfMax, rawMs); if (now - perfT > 500) { perfEl.textContent = `${Math.round(perfN * 1000 / (now - perfT))}fps worst ${Math.round(perfMax)}ms calls ${perf.calls} fx ${fxLevel} dpr ${renderer.getPixelRatio()}`; perfN = 0; perfMax = 0; perfT = now; } }
   const t0 = performance.now();
   renderer.info.reset();
   update(dt);
@@ -976,13 +1005,13 @@ function frame(now) {
    so nothing hitches the first time an effect appears. */
 function prewarm() {
   [atlasTex, slabTop.map, ringTex, ...digits.slice(1).flat()].forEach((t) => renderer.initTexture(t));
-  const objs = [ghost, selRing, tgtRing, ...Object.values(labels), ...pool.map((p) => p.m)], was = objs.map((o) => o.visible);
+  const objs = [ghost, selRing, tgtRing, ...Object.values(labels), partMesh], was = objs.map((o) => o.visible);
   objs.forEach((o) => { o.visible = true; });
   renderer.compile(scene, camera);
   renderer.setRenderTarget(rt); renderer.render(scene, camera); renderer.setRenderTarget(null);
   objs.forEach((o, i) => { o.visible = was[i]; });
 }
-layout(); setView(view, true); renderScore(false); resetGame();
+layout(); setView(view, true); renderScore(false); resetGame(); if (fxLevel > 0) setFx(fxLevel, false);
 prewarm();
 requestAnimationFrame(frame);
 
@@ -1004,7 +1033,7 @@ window.__game = {
     const xs = pts.slice(4, 8).map((p) => (p.x * .5 + .5) * r.width), ys = pts.map((p) => (-p.y * .5 + .5) * r.height);
     return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys), W: r.width, H: r.height, hudBottom: document.getElementById('spawnbar').getBoundingClientRect().bottom };
   },
-  addScore(n) { score += n; }, setFx, get fx() { return fxLevel; }, get poolSize() { return diePool.length; }, perf, resetPerf() { perf.maxCpu = 0; perf.n = 0; perf.cpu.fill(0); }, get started() { return started; }, get best() { return best; },
+  addScore(n) { score += n; }, setFx, fxMonitorStep() { setFx(Math.min(2, fxLevel + 1), true); }, get fx() { return fxLevel; }, get poolSize() { return diePool.length; }, perf, resetPerf() { perf.maxCpu = 0; perf.n = 0; perf.cpu.fill(0); }, get started() { return started; }, get best() { return best; },
   get mode() { return drag ? drag.mode : null; },
   get chains() { return chains.map((c) => ({ t: c.t, dur: c.dur, n: dice.filter((d) => d.chain === c).length })); },
   get view() { return view; }, setView(v) { setView(v, true); },
