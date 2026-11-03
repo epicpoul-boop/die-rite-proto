@@ -302,12 +302,276 @@ function ringTexture() {
 const slabSide = psx(new THREE.MeshLambertMaterial({ color: 0x140d22 }));
 const slabTop = psx(new THREE.MeshLambertMaterial({ map: floorTexture() }));
 const slab = new THREE.Mesh(new THREE.BoxGeometry(N, 2.4, N), [slabSide, slabSide, slabTop, slabSide, slabSide, slabSide]);
-slab.position.y = -1.2; scene.add(slab);
+slab.position.y = -1.2;
 const rimMat = psx(new THREE.MeshLambertMaterial({ color: 0x3a2760, emissive: 0x1a0a30 }));
+const rimMeshes = [];
 const rimLong = new THREE.BoxGeometry(N + 0.6, 0.22, 0.3), rimShort = new THREE.BoxGeometry(0.3, 0.22, N);
 for (const [g, x, z] of [[rimLong, 0, -(N / 2 + .15)], [rimLong, 0, N / 2 + .15], [rimShort, -(N / 2 + .15), 0], [rimShort, N / 2 + .15, 0]]) {
-  const m = new THREE.Mesh(g, rimMat); m.position.set(x, 0.0, z); scene.add(m);
+  const m = new THREE.Mesh(g, rimMat); m.position.set(x, 0.0, z); rimMeshes.push(m);
 }
+const boardVar = ['a', 'b', 'c'].includes(params.get('board')) ? params.get('board') : null;   // DRAFT: ?board=a|b|c (&nodemo hides the example pit + wall)
+
+/* ---------- board system: stone tiles + themed border (draft variants via ?board=a|b|c) ----------
+   Data-driven so pits (void tiles) and walls (between-tile edges) are just entries in `layout` / `walls`.
+   Everything is merged into ONE lit mesh (one atlas texture) + ONE additive glow mesh (candles, runes, grout glow). */
+const boardTexs = [], glowRunes = []; let boardTick = null;
+function buildBoard(V, demo) {
+  const AT = 512, e = 0.5 / AT;
+  let rs = ({ a: 1234567, b: 7654321, c: 9988776 })[V] >>> 0;
+  const R = () => { rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const ri = (n) => Math.floor(R() * n);
+  /* ---- atlas (shelf-packed rects) ---- */
+  const atlas = mkCanvas(AT, AT), g = atlas.getContext('2d');
+  let ax = 0, ay = 0, rowH = 0;
+  const alloc = (w, h) => { if (ax + w > AT) { ax = 0; ay += rowH; rowH = 0; } const r = { x: ax, y: ay, w, h }; ax += w; rowH = Math.max(rowH, h); if (ay + h > AT) throw new Error('atlas full'); return r; };
+  const many = (n, w, h) => Array.from({ length: n }, () => alloc(w, h));
+  const rect = {
+    tile: many(8, 64, 64), side: many(4, 64, 32), bev: many(4, 64, 16), mortar: alloc(64, 64), deep: alloc(32, 32),
+    borW: many(4, 192, 64), borSide: many(4, 64, 32), sq: many(3, 64, 64), skull: many(2, 64, 64), pip: many(6, 64, 64),
+    pillarTop: many(2, 64, 64), wallTop: many(2, 192, 28), wallSide: many(2, 128, 48), wax: alloc(16, 32)
+  };
+  const P = ({
+    a: { tile: [66, 66, 70], bev: [98, 98, 106], mortar: [74, 66, 60], bor: [70, 68, 74], pil: [84, 82, 90], wall: [66, 64, 72], deep: [14, 10, 22], tint: [1.04, 1, .94], moss: 0, crack: 5, spk: 26 },
+    b: { tile: [32, 30, 42], bev: [70, 66, 92], mortar: [10, 6, 14], bor: [42, 40, 56], pil: [34, 32, 46], wall: [38, 36, 52], deep: [6, 2, 8], tint: [0.98, 0.98, 1.08], moss: 0, crack: 3, spk: 18 },
+    c: { tile: [72, 78, 58], bev: [102, 106, 78], mortar: [44, 50, 36], bor: [84, 86, 68], pil: [96, 98, 76], wall: [78, 82, 62], deep: [8, 14, 10], tint: [0.98, 1.0, 0.92], moss: 1, crack: 6, spk: 30 }
+  })[V];
+  const sh = (c, d) => `rgb(${Math.max(0, Math.min(255, c[0] + d)) | 0},${Math.max(0, Math.min(255, c[1] + d)) | 0},${Math.max(0, Math.min(255, c[2] + d)) | 0})`;
+  const clipTo = (r) => { g.save(); g.beginPath(); g.rect(r.x, r.y, r.w, r.h); g.clip(); };
+  function stone(r, base, o = {}) {
+    clipTo(r); g.fillStyle = sh(base, 0); g.fillRect(r.x, r.y, r.w, r.h);
+    const A = r.w * r.h / 4096;
+    for (let k = 0; k < (o.blot ?? 12) * A; k++) { const s = 5 + R() * 18; g.fillStyle = sh(base, (R() - .5) * (o.amt ?? 20)); g.fillRect(r.x + R() * r.w - s / 2 | 0, r.y + R() * r.h - s / 2 | 0, s | 0, s * (.4 + R() * .9) | 0); }
+    for (let k = 0; k < (o.spk ?? 150) * A; k++) { g.fillStyle = sh(base, (R() - .5) * (o.spkAmt ?? 44)); const s = R() < .85 ? 1 : 2; g.fillRect(r.x + R() * r.w | 0, r.y + R() * r.h | 0, s, s); }
+    for (let k = 0; k < (o.strata ?? 0); k++) { g.fillStyle = sh(base, -12 - R() * 10); g.fillRect(r.x, r.y + R() * r.h | 0, r.w, 1); }
+    for (let k = 0; k < (o.crack ?? 0); k++) {            // jagged cracks: light lip under a dark line
+      let x = r.x + R() * r.w, y = r.y + R() * r.h, a = R() * 6.28;
+      for (let s = 0; s < 8 + R() * 14; s++) { a += (R() - .5) * 1.3; x += Math.cos(a) * 2; y += Math.sin(a) * 2; g.fillStyle = sh(base, 22); g.fillRect(x | 0, (y + 1) | 0, 1, 1); g.fillStyle = sh(base, -(o.crackD ?? 58)); g.fillRect(x | 0, y | 0, 1, 1); }
+    }
+    if (o.moss) for (let k = 0; k < o.moss * A; k++) {    // moss creeping in from the corners / edges
+      const side = ri(4), px = side < 2 ? (side ? r.w - R() * 14 : R() * 14) : R() * r.w, py = side >= 2 ? (side === 3 ? r.h - R() * 12 : R() * 12) : R() * r.h;
+      for (let q = 0; q < 14; q++) { g.fillStyle = `rgb(${46 + ri(30)},${84 + ri(50)},${38 + ri(24)})`; g.fillRect(r.x + px + (R() - .5) * 18 | 0, r.y + py + (R() - .5) * 14 | 0, 2 + ri(4), 2 + ri(3)); }
+    }
+    if (o.edge) {                                          // worn bevel: light top/left, dark bottom/right
+      g.fillStyle = sh(base, 34); g.fillRect(r.x, r.y, r.w, 2); g.fillRect(r.x, r.y, 2, r.h);
+      g.fillStyle = sh(base, -40); g.fillRect(r.x, r.y + r.h - 2, r.w, 2); g.fillRect(r.x + r.w - 2, r.y, 2, r.h);
+    }
+    g.restore();
+  }
+  const poly = (pts, r, cx, cy, sc, col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.lineCap = 'square'; g.lineJoin = 'miter'; pts.forEach((pl) => { g.beginPath(); pl.forEach(([x, y], i) => { const X = r.x + cx + (x - .5) * sc, Y = r.y + cy + (y - .5) * sc; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }); g.stroke(); }); };
+  const RUNES = [[[[.5, .1], [.5, .9]], [[.5, .32], [.8, .14]], [[.5, .52], [.8, .34]]], [[[.3, .1], [.3, .9]], [[.3, .1], [.72, .32], [.3, .52]], [[.3, .52], [.72, .74]]],
+    [[[.22, .12], [.78, .88]], [[.78, .12], [.22, .88]], [[.22, .5], [.78, .5]]], [[[.5, .08], [.18, .5], [.5, .92], [.82, .5], [.5, .08]], [[.5, .08], [.5, .92]]]];
+  const bone = [205, 198, 170];
+  function skullPix(r, o) {                                // 16x16 carved skull
+    clipTo(r); const u = 4;
+    const R2 = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(r.x + x * u, r.y + y * u, w * u, h * u); };
+    R2(2, 1, 12, 12, '#1a1410'); R2(3, 0, 10, 14, '#1a1410'); R2(4, 11, 8, 5, '#1a1410');            // dark outline / recess
+    R2(3, 1, 10, 10, sh(bone, o)); R2(2, 3, 12, 6, sh(bone, o)); R2(5, 10, 6, 4, sh(bone, o - 12));
+    R2(4, 5, 3, 3, '#140c0c'); R2(9, 5, 3, 3, '#140c0c'); R2(7, 9, 2, 2, '#2a1c18'); R2(5, 12, 1, 2, '#1a1410'); R2(7, 12, 1, 2, '#1a1410'); R2(9, 12, 1, 2, '#1a1410');
+    R2(3, 1, 10, 1, sh(bone, o + 22)); g.restore();
+  }
+  function pipFace(r, n, base) {                           // carved die face on a block top
+    stone(r, base, { blot: 6, spk: 90, crack: 1 }); clipTo(r);
+    g.fillStyle = sh(base, -45); g.fillRect(r.x + 4, r.y + 4, r.w - 8, r.h - 8); g.fillStyle = sh(base, 10); g.fillRect(r.x + 6, r.y + 6, r.w - 12, r.h - 12);
+    const L = 18, M = 32, Rr = 46, PP = { 1: [[M, M]], 2: [[L, L], [Rr, Rr]], 3: [[L, L], [M, M], [Rr, Rr]], 4: [[L, L], [Rr, L], [L, Rr], [Rr, Rr]], 5: [[L, L], [Rr, L], [M, M], [L, Rr], [Rr, Rr]], 6: [[L, L], [L, M], [L, Rr], [Rr, L], [Rr, M], [Rr, Rr]] }[n];
+    for (const [x, y] of PP) { const d = (cx, cy, rr, col) => { g.fillStyle = col; for (let j = -rr; j <= rr; j++) for (let i = -rr; i <= rr; i++) if (i * i + j * j <= rr * rr) g.fillRect(r.x + cx + i, r.y + cy + j, 1, 1); };
+      d(x + 1, y + 1, 7, sh(base, 30)); d(x, y, 7, n === 1 ? '#3a0610' : '#16120e'); d(x, y, 5, n === 1 ? '#a01228' : '#2a2218'); if (n === 1) d(x - 1, y - 1, 2, '#ff5a50'); }
+    g.restore();
+  }
+  /* ---- paint ---- */
+  for (let i = 0; i < 8; i++) stone(rect.tile[i], P.tile.map((v) => v + (i % 3 - 1) * 4), { edge: true, blot: 14, spk: P.spk * 5, crack: i % 2 ? 1 : (R() < .5 ? 2 : 0), moss: P.moss ? 6 : 0, strata: V === 'a' ? 3 : 0, amt: V === 'b' ? 10 : 22, spkAmt: V === 'b' ? 70 : 44 });
+  if (V === 'b') for (const r of rect.tile) { clipTo(r); for (let k = 0; k < 16; k++) { g.fillStyle = `rgb(${70 + ri(40)},${70 + ri(40)},${110 + ri(50)})`; g.fillRect(r.x + ri(64), r.y + ri(64), 1, 1); } g.restore(); }   // basalt sheen glints
+  for (const r of rect.side) stone(r, P.tile.map((v) => v * .62), { blot: 8, spk: 80, strata: 2 });
+  for (const r of rect.bev) stone(r, P.bev, { blot: 4, spk: 60, amt: 14 });
+  stone(rect.mortar, P.mortar, { blot: 10, spk: 220, amt: 14 }); stone(rect.deep, P.deep, { blot: 2, spk: 20, amt: 6 });
+  rect.borW.forEach((r, i) => {
+    stone(r, P.bor.map((v) => v + (i - 1.5) * 3), { edge: true, blot: 20, spk: P.spk * 5, crack: V === 'b' ? 2 : 3, strata: V === 'a' ? 3 : 0, moss: P.moss ? 14 : 0, amt: V === 'b' ? 10 : 20 });
+    clipTo(r); const c0 = sh(P.bor, -50), c1 = sh(P.bor, 32);
+    if (V === 'a') {                                       // carved grooves: inset frame + a chevron / diamond / notch pattern per variant
+      const grv = (x, y, w, h) => { g.fillStyle = c0; g.fillRect(r.x + x, r.y + y, w, h); g.fillStyle = c1; g.fillRect(r.x + x + 1, r.y + y + h, w, 1); };
+      grv(8, 10, 176, 2); grv(8, 52, 176, 2);
+      if (i === 0) { for (let k = 0; k < 6; k++) grv(24 + k * 26, 20, 2, 24); }
+      if (i === 1) { poly([[[70, 32], [96, 18], [122, 32], [96, 46], [70, 32]]], { x: 0, y: 0 }, r.x - 0, r.y, 1, c0, 3); poly([[[40, 24], [60, 32], [40, 40]], [[152, 24], [132, 32], [152, 40]]], { x: 0, y: 0 }, r.x, r.y, 1, c0, 3); }
+      if (i === 2) { for (let k = 0; k < 3; k++) { g.fillStyle = c0; g.fillRect(r.x + 30 + k * 50, r.y + 22, 14, 14); g.fillStyle = c1; g.fillRect(r.x + 30 + k * 50, r.y + 36, 14, 1); } }
+    } else if (V === 'b') {                                // engraved rune in the centre, hairline frame
+      g.fillStyle = c0; g.fillRect(r.x + 6, r.y + 8, 180, 1); g.fillRect(r.x + 6, r.y + 55, 180, 1);
+      poly(RUNES[i], r, 96, 32, 40, 'rgb(4,2,8)', 5); poly(RUNES[i], r, 97, 33, 40, sh(P.bor, 30), 1);
+      g.fillStyle = c0; for (const x of [28, 164]) { g.fillRect(r.x + x, r.y + 26, 6, 12); }
+    } else {                                               // temple: plain weathered strip with chiselled seam
+      g.fillStyle = c0; g.fillRect(r.x + 64, r.y + 6, 2, 52); g.fillRect(r.x + 128, r.y + 6, 2, 52);
+    }
+    g.restore();
+  });
+  for (const r of rect.borSide) stone(r, P.bor.map((v) => v * .7), { blot: 8, spk: 80, strata: 2, moss: P.moss ? 8 : 0 });
+  rect.sq.forEach((r, i) => stone(r, P.pil.map((v) => v + (i - 1) * 4), { edge: true, blot: 8, spk: P.spk * 3, crack: 2, moss: P.moss ? 8 : 0 }));
+  rect.skull.forEach((r, i) => { stone(r, P.pil, { edge: true, blot: 6, spk: 100, moss: P.moss ? 6 : 0 }); skullPix(r, i * 10 - 14); });
+  rect.pip.forEach((r, i) => pipFace(r, i + 1, P.pil));
+  rect.pillarTop.forEach((r, i) => { stone(r, P.pil.map((v) => v + 6), { edge: true, blot: 8, spk: P.spk * 3, crack: 1, moss: P.moss ? 6 : 0 }); clipTo(r);
+    if (V === 'a') { g.fillStyle = sh(P.pil, -46); g.fillRect(r.x + 14, r.y + 14, 36, 36); g.fillStyle = sh(P.pil, -22); g.fillRect(r.x + 18, r.y + 18, 28, 28); g.fillStyle = sh([150, 130, 70], i * 8); g.fillRect(r.x + 24, r.y + 24, 16, 16); }   // candle holder dish
+    if (V === 'b') { g.fillStyle = '#05020a'; g.fillRect(r.x + 18, r.y + 18, 28, 28); g.fillStyle = '#3a0814'; g.fillRect(r.x + 22, r.y + 22, 20, 20); }                            // gem socket
+    g.restore(); });
+  rect.wallTop.forEach((r, i) => { stone(r, P.wall.map((v) => v + 12), { edge: true, blot: 14, spk: 360, crack: 3, moss: P.moss ? 20 : 0 }); clipTo(r);
+    if (V === 'b') { g.fillStyle = '#05020a'; g.fillRect(r.x + 8, r.y + 12, 176, 4); }
+    g.restore(); });
+  rect.wallSide.forEach((r, i) => { stone(r, P.wall, { blot: 10, spk: 250, strata: 0, moss: P.moss ? 14 : 0 }); clipTo(r);
+    g.fillStyle = sh(P.wall, -52);                         // brick / block courses
+    for (let y = 0; y < 48; y += 16) { g.fillRect(r.x, r.y + y, r.w, 1); const off = (y / 16 % 2) * 22; for (let x = off; x < 128; x += 44) g.fillRect(r.x + x, r.y + y, 1, 16); }
+    g.restore(); });
+  { const r = rect.wax; g.fillStyle = '#d8ccae'; g.fillRect(r.x, r.y, r.w, r.h); g.fillStyle = '#b8aa88'; for (let k = 0; k < 10; k++) g.fillRect(r.x + ri(16), r.y + ri(32), 1, 2 + ri(5)); }
+  const tex = new THREE.CanvasTexture(atlas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; boardTexs.push(tex);
+  /* ---- glow atlas (additive): radial halo, flame, runes, solid ---- */
+  const gA = mkCanvas(256, 256), gg = gA.getContext('2d');
+  const GR = { halo: { x: 0, y: 0, w: 64, h: 64 }, flame: { x: 64, y: 0, w: 32, h: 48 }, solid: { x: 96, y: 0, w: 8, h: 8 }, rune: [0, 1, 2, 3].map((i) => ({ x: i * 64, y: 64, w: 64, h: 64 })) };
+  { const gr = gg.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.35, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, 64, 64);
+    gg.fillStyle = '#fff'; gg.fillRect(96, 0, 8, 8);
+    const fr = (x, y, w, h, c) => { gg.fillStyle = c; gg.fillRect(64 + x, y + 0, w, h); };        // pixel flame
+    fr(13, 4, 6, 8, '#ff8a2a'); fr(10, 12, 12, 14, '#ff8a2a'); fr(8, 24, 16, 14, '#ff6a1a'); fr(11, 36, 10, 10, '#ff5a10'); fr(13, 14, 6, 14, '#ffd25a'); fr(12, 28, 8, 14, '#fff0b0');
+    GR.rune.forEach((r, i) => { gg.shadowColor = '#ff2a2a'; gg.shadowBlur = 8; gg.strokeStyle = '#fff'; gg.lineWidth = 4; gg.lineCap = 'round';
+      RUNES[i].forEach((pl) => { gg.beginPath(); pl.forEach(([x, y], j) => { const X = r.x + 32 + (x - .5) * 44, Y = r.y + 32 + (y - .5) * 44; j ? gg.lineTo(X, Y) : gg.moveTo(X, Y); }); gg.stroke(); }); gg.shadowBlur = 0; }); }
+  const gtex = new THREE.CanvasTexture(gA); gtex.magFilter = THREE.NearestFilter; gtex.minFilter = THREE.NearestFilter; gtex.generateMipmaps = false; boardTexs.push(gtex);
+  /* ---- geometry accumulators ---- */
+  const mk = () => ({ p: [], u: [], c: [] }), M = mk(), GL = mk();
+  const uvOf = (r, W, j, k, fl) => { const B = [[0, 1], [0, 0], [1, 0], [1, 1]][fl ? (k + 4 - j) % 4 : (j + k) % 4]; return [(r.x + 0.5 + B[0] * (r.w - 1)) / W, 1 - (r.y + 0.5 + (1 - B[1]) * (r.h - 1)) / W]; };
+  function Q(A, pts, r, k, cols, hint, W, fl = 0) {            // quad with outward-winding fix
+    let idx = [0, 1, 2, 3];
+    const a = pts[0], b = pts[1], c = pts[2], ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    if (hint && ((uy * vz - uz * vy) * hint[0] + (uz * vx - ux * vz) * hint[1] + (ux * vy - uy * vx) * hint[2]) < 0) idx = [3, 2, 1, 0];
+    const V4 = idx.map((j) => ({ p: pts[j], uv: uvOf(r, W, j, k, fl), c: cols[j] }));
+    for (const t of [0, 1, 2, 0, 2, 3]) { const v = V4[t]; A.p.push(v.p[0], v.p[1], v.p[2]); A.u.push(v.uv[0], v.uv[1]); A.c.push(v.c[0], v.c[1], v.c[2]); }
+  }
+  const mq = (pts, r, k, cols, hint, fl) => Q(M, pts, r, k, cols, hint, AT, fl), gq = (pts, r, k, col, hint) => Q(GL, pts, r, k, [col, col, col, col], hint, 256);
+  const scl = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
+  /* chamfered stone block: inset top + bevel ring + sides fading to dark (optionally a deep dark skirt below) */
+  function block(x0, x1, y0, y1, z0, z1, b, o) {
+    const t = o.tint, yb = y1 - b, ct = scl(t, 1), cm = scl(t, .62), cd = scl(t, .1), top = [[x0 + b, y1, z0 + b], [x0 + b, y1, z1 - b], [x1 - b, y1, z1 - b], [x1 - b, y1, z0 + b]];
+    mq(top, o.top, o.topK || 0, [ct, ct, ct, ct], [0, 1, 0], o.topFl);
+    const bc = scl(t, 1.12), bo = [bc, bc, ct, ct];
+    mq([[x0 + b, y1, z0 + b], [x0 + b, y1, z1 - b], [x0, yb, z1], [x0, yb, z0]], o.bev, 0, [bc, bc, ct, ct], [-1, 1, 0]);
+    mq([[x1 - b, y1, z1 - b], [x1 - b, y1, z0 + b], [x1, yb, z0], [x1, yb, z1]], o.bev, 0, [bc, bc, ct, ct], [1, 1, 0]);
+    mq([[x1 - b, y1, z0 + b], [x0 + b, y1, z0 + b], [x0, yb, z0], [x1, yb, z0]], o.bev, 0, [bc, bc, ct, ct], [0, 1, -1]);
+    mq([[x0 + b, y1, z1 - b], [x1 - b, y1, z1 - b], [x1, yb, z1], [x0, yb, z1]], o.bev, 0, [bc, bc, ct, ct], [0, 1, 1]);
+    const ym = o.deep ? Math.max(y0, yb - 0.4) : y0, S4 = o.sides || [1, 1, 1, 1];
+    const side = (pts, hint, on) => { if (!on) return; mq(pts, o.side, 0, [cm, cm, cd, cd], hint);
+      if (o.deep && ym > y0) mq([pts[3], pts[2], [pts[2][0], y0, pts[2][2]], [pts[3][0], y0, pts[3][2]]], rect.deep, 0, [cd, cd, cd, cd], hint); };
+    side([[x1, yb, z1], [x1, yb, z0], [x1, ym, z0], [x1, ym, z1]], [1, 0, 0], S4[0]);
+    side([[x0, yb, z0], [x0, yb, z1], [x0, ym, z1], [x0, ym, z0]], [-1, 0, 0], S4[1]);
+    side([[x0, yb, z1], [x1, yb, z1], [x1, ym, z1], [x0, ym, z1]], [0, 0, 1], S4[2]);
+    side([[x1, yb, z0], [x0, yb, z0], [x0, ym, z0], [x1, ym, z0]], [0, 0, -1], S4[3]);
+  }
+  /* ---- layout data: tiles, pits, walls (the future-proof part) ---- */
+  const layout = Array.from({ length: N }, () => Array(N).fill('tile'));
+  const walls = [];                                           // {gx, gy, side:'e'|'s'}: wall on the east / south edge of tile (gx,gy)
+  if (demo) { layout[2][4] = 'pit'; walls.push({ gx: 1, gy: 3, side: 's' }); }
+  const present = (gx, gy) => gx >= 0 && gy >= 0 && gx < N && gy < N && layout[gy][gx] === 'tile';
+  const wc = (i) => i - (N - 1) / 2, GAP = 0.03, FLOOR = -0.06, DEEP = -0.9;
+  const tcol = () => P.tint.map((v) => v * (0.9 + R() * 0.2));
+  for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
+    const cx = wc(gx), cz = wc(gy);
+    if (!present(gx, gy)) {                                   // pit: dark floor far below (tile skirts next to it go all the way down)
+      mq([[cx - .5, DEEP, cz - .5], [cx - .5, DEEP, cz + .5], [cx + .5, DEEP, cz + .5], [cx + .5, DEEP, cz - .5]], rect.deep, 0, Array(4).fill(scl(P.tint, .5)), [0, 1, 0]);
+      if (V === 'b') gq([[cx - .5, DEEP + .02, cz - .5], [cx - .5, DEEP + .02, cz + .5], [cx + .5, DEEP + .02, cz + .5], [cx + .5, DEEP + .02, cz - .5]], GR.halo, 0, [1.5, .22, .15], [0, 1, 0]);
+      continue;
+    }
+    mq([[cx - .5, FLOOR, cz - .5], [cx - .5, FLOOR, cz + .5], [cx + .5, FLOOR, cz + .5], [cx + .5, FLOOR, cz - .5]], rect.mortar, ri(4), Array(4).fill(scl(P.tint, 1)), [0, 1, 0]);
+    const h = -R() * 0.035, b = 0.035 + R() * 0.035, tn = tcol();
+    const nb = [present(gx + 1, gy), present(gx - 1, gy), present(gx, gy + 1), present(gx, gy - 1)];
+    block(cx - .5 + GAP, cx + .5 - GAP, nb.every((v) => v) ? FLOOR : DEEP, h, cz - .5 + GAP, cz + .5 - GAP, b, { top: rect.tile[ri(8)], topK: ri(4), topFl: ri(2), bev: rect.bev[ri(4)], side: rect.side[ri(4)], tint: tn, deep: true, sides: nb.map((v) => v ? 0 : 1) });
+    if (nb.some((v) => !v)) {}                                  // (sides only drawn where a neighbour is missing; interior gaps show the mortar)
+  }
+  // faces towards neighbours that exist are skipped; give every tile a short skirt so gaps look deep rather than flat
+  for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) if (present(gx, gy)) {
+    const cx = wc(gx), cz = wc(gy), ds = scl(P.tint, .22), x0 = cx - .5 + GAP, x1 = cx + .5 - GAP, z0 = cz - .5 + GAP, z1 = cz + .5 - GAP;
+    const sk = (pts, hint) => mq(pts, rect.side[0], 0, [ds, ds, scl(P.tint, .06), scl(P.tint, .06)], hint);
+    if (present(gx + 1, gy)) sk([[x1, -.02, z1], [x1, -.02, z0], [x1, FLOOR, z0], [x1, FLOOR, z1]], [1, 0, 0]);
+    if (present(gx - 1, gy)) sk([[x0, -.02, z0], [x0, -.02, z1], [x0, FLOOR, z1], [x0, FLOOR, z0]], [-1, 0, 0]);
+    if (present(gx, gy + 1)) sk([[x0, -.02, z1], [x1, -.02, z1], [x1, FLOOR, z1], [x0, FLOOR, z1]], [0, 0, 1]);
+    if (present(gx, gy - 1)) sk([[x1, -.02, z0], [x0, -.02, z0], [x0, FLOOR, z0], [x1, FLOOR, z0]], [0, 0, -1]);
+  }
+  /* ---- border (outer footprint identical to the old rim: 0.3 wide, out to N/2+0.3) ---- */
+  const HB = N / 2, BW = 0.3, bt = scl(P.tint, 1);
+  const hts = { a: [0.11, 0.3], b: [0.14, 0.36], c: [0.3, 0.5] }[V];
+  const sidesOut = (o) => o;                                  // (rim blocks: all four sides drawn; deep skirt hides the slab body)
+  const sideK = { n: 0, e: 1, s: 2, w: 3 };
+  const edges = [['n', -1], ['s', 1], ['w', -1], ['e', 1]];
+  for (const [sd, sg] of edges) {
+    const horiz = sd === 'n' || sd === 's';
+    const lo = sg < 0 ? -HB - BW : HB, hi = lo + BW;
+    const per = V === 'c' ? 3 : 1, len = 1 / per;
+    for (let i = 0; i < N; i++) for (let j = 0; j < per; j++) {
+      const a0 = wc(i) - .5 + j * len + 0.012, a1 = a0 + len - 0.024, tnn = tcol();
+      let y1 = hts[0] + (R() - .5) * 0.02, top, k = sideK[sd], motif = false, rn = ri(4);
+      if (V === 'a') top = rect.borW[(i + ri(2) * 2 + (sd.charCodeAt(0) % 3)) % 4];
+      else if (V === 'b') top = rect.borW[rn];
+      else {                                                 // C: chunky block rhythm; the middle block of each tile carries a skull / pip
+        const mid = j === 1; y1 = hts[0] + (mid ? 0.02 : -0.04 + R() * 0.03);
+        if (mid) { motif = true; top = (i + (sd === 'n' || sd === 'e' ? 1 : 0)) % 2 ? rect.skull[ri(2)] : rect.pip[ri(6)]; } else top = rect.sq[ri(3)];
+        k = mid ? sideK[sd] : ri(4);
+      }
+      const bx = horiz ? [a0, a1, lo, hi] : [lo, hi, a0, a1];
+      block(bx[0], bx[1], -2.4, y1, bx[2], bx[3], V === 'c' ? 0.05 : 0.045, { top, topK: k, bev: rect.bev[ri(4)], side: rect.borSide[ri(4)], tint: tnn, deep: true });
+      if (V === 'b') { const cxm = (bx[0] + bx[1]) / 2, czm = (bx[2] + bx[3]) / 2, s2 = 0.27; glowRunes.push([cxm, y1 + 0.004, czm, s2, k, rn]); }
+    }
+  }
+  /* corners: pillars (candles on A, gem obelisks on B, capped pillar blocks on C) */
+  const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  const lit = []; 
+  for (const [sx, sz] of corners) {
+    const x0 = sx < 0 ? -HB - BW : HB, z0 = sz < 0 ? -HB - BW : HB, yh = hts[1] + R() * 0.02;
+    block(x0 + .008, x0 + BW - .008, -2.4, yh, z0 + .008, z0 + BW - .008, V === 'b' ? 0.1 : 0.04, { top: rect.pillarTop[ri(2)], topK: ri(4), bev: rect.bev[ri(4)], side: rect.borSide[ri(4)], tint: scl(P.tint, 1.04), deep: true });
+    lit.push([x0 + BW / 2, yh, z0 + BW / 2]);
+  }
+  const candle = (cx, y0, cz) => {                            // low-poly wax candle (6-sided) + flame
+    const n = 6, rr = 0.075, hh = 0.24, w = scl(P.tint, 1.15);
+    for (let i = 0; i < n; i++) { const a0 = i / n * 6.283, a1 = (i + 1) / n * 6.283, p0 = [cx + Math.cos(a0) * rr, cz + Math.sin(a0) * rr], p1 = [cx + Math.cos(a1) * rr, cz + Math.sin(a1) * rr];
+      mq([[p0[0], y0 + hh, p0[1]], [p1[0], y0 + hh, p1[1]], [p1[0], y0, p1[1]], [p0[0], y0, p0[1]]], rect.wax, 0, [w, w, scl(w, .7), scl(w, .7)], [Math.cos((a0 + a1) / 2), 0, Math.sin((a0 + a1) / 2)]); }
+    const top = [...Array(n).keys()].map((i) => [cx + Math.cos(i / n * 6.283) * rr, y0 + hh, cz + Math.sin(i / n * 6.283) * rr]);
+    mq([top[0], top[1], top[2], top[3]], rect.wax, 0, Array(4).fill(w), [0, 1, 0]); mq([top[3], top[4], top[5], top[0]], rect.wax, 0, Array(4).fill(w), [0, 1, 0]);
+    const fy = y0 + hh + 0.02, fw = 0.1, fh = 0.2, wh = [1.3, 1, 0.9];
+    gq([[cx - fw, fy + fh, cz], [cx + fw, fy + fh, cz], [cx + fw, fy, cz], [cx - fw, fy, cz]], GR.flame, 0, [1.3, 1.1, .9], [0, 0, 1]); gq([[cx, fy + fh, cz - fw], [cx, fy + fh, cz + fw], [cx, fy, cz + fw], [cx, fy, cz - fw]], GR.flame, 0, [1.3, 1.1, .9], [1, 0, 0]);
+    gq([[cx - .55, fy - .02, cz - .55], [cx - .55, fy - .02, cz + .55], [cx + .55, fy - .02, cz + .55], [cx + .55, fy - .02, cz - .55]], GR.halo, 0, [.55, .26, .1], [0, 1, 0]);                // warm pool of light
+    gq([[cx - .3, fy + .16, cz], [cx + .3, fy + .16, cz], [cx + .3, fy - .1, cz], [cx - .3, fy - .1, cz]], GR.halo, 0, [.5, .24, .08], [0, 0, 1]);
+  };
+  if (V === 'a') for (const [x, y, z] of lit) candle(x, y, z);
+  if (V === 'b') for (const [x, y, z] of lit) gq([[x - .17, y + .004, z - .17], [x - .17, y + .004, z + .17], [x + .17, y + .004, z + .17], [x + .17, y + .004, z - .17]], GR.halo, 0, [1.2, .16, .14], [0, 1, 0]);
+  if (V === 'c') for (const [x, y, z] of lit) {                // capped pillar: a smaller cap block on top
+    block(x - .1, x + .1, y, y + .08, z - .1, z + .1, .025, { top: rect.sq[0], bev: rect.bev[0], side: rect.borSide[1], tint: scl(P.tint, 1.1) });
+  }
+  /* ---- the demo wall (between two tiles) ---- */
+  for (const w of walls) {
+    const east = w.side === 'e', cx = wc(w.gx) + (east ? .5 : 0), cz = wc(w.gy) + (east ? 0 : .5), tw = 0.085;
+    const bx = east ? [cx - tw, cx + tw, cz - .5 + GAP, cz + .5 - GAP] : [cx - .5 + GAP, cx + .5 - GAP, cz - tw, cz + tw];
+    const parts = V === 'c' ? [[0, .5, .66], [.5, 1, .46]] : [[0, 1, V === 'b' ? .7 : .62]];     // C: crumbled, stepped top
+    parts.forEach(([f0, f1, hh], pi) => {
+      const L0 = east ? bx[2] + (bx[3] - bx[2]) * f0 : bx[0] + (bx[1] - bx[0]) * f0, L1 = east ? bx[2] + (bx[3] - bx[2]) * f1 : bx[0] + (bx[1] - bx[0]) * f1;
+      block(east ? bx[0] : L0, east ? bx[1] : L1, FLOOR, hh, east ? L0 : bx[2], east ? L1 : bx[3], 0.03, { top: rect.wallTop[pi % 2], topK: east ? 1 : 0, bev: rect.bev[ri(4)], side: rect.wallSide[pi % 2], tint: scl(P.tint, 1.0) });
+    });
+    if (V === 'b') { const y = .7 + .004; gq(east ? [[cx - .03, y, cz - .42], [cx - .03, y, cz + .42], [cx + .03, y, cz + .42], [cx + .03, y, cz - .42]] : [[cx - .42, y, cz - .03], [cx - .42, y, cz + .03], [cx + .42, y, cz + .03], [cx + .42, y, cz - .03]], GR.solid, 0, [1, .15, .12], [0, 1, 0]); }
+  }
+  /* B: faint red glow in the grout lines (strips only where two real tiles meet / tile meets border) */
+  if (V === 'b') {
+    const sy = FLOOR + 0.004, sw = 0.022;
+    for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) if (present(gx, gy)) {
+      const cx = wc(gx), cz = wc(gy), col = [.42, .05, .05];
+      if (gx === N - 1 || present(gx + 1, gy)) gq([[cx + .5 - sw, sy, cz - .5], [cx + .5 - sw, sy, cz + .5], [cx + .5 + sw, sy, cz + .5], [cx + .5 + sw, sy, cz - .5]], GR.solid, 0, col, [0, 1, 0]);
+      if (gx === 0) gq([[cx - .5 - sw, sy, cz - .5], [cx - .5 - sw, sy, cz + .5], [cx - .5 + sw, sy, cz + .5], [cx - .5 + sw, sy, cz - .5]], GR.solid, 0, col, [0, 1, 0]);
+      if (gy === N - 1 || present(gx, gy + 1)) gq([[cx - .5, sy, cz + .5 - sw], [cx - .5, sy, cz + .5 + sw], [cx + .5, sy, cz + .5 + sw], [cx + .5, sy, cz + .5 - sw]], GR.solid, 0, col, [0, 1, 0]);
+      if (gy === 0) gq([[cx - .5, sy, cz - .5 - sw], [cx - .5, sy, cz - .5 + sw], [cx + .5, sy, cz - .5 + sw], [cx + .5, sy, cz - .5 - sw]], GR.solid, 0, col, [0, 1, 0]);
+    }
+  }
+  for (const [x, y, z, s2, k, rn] of glowRunes) {              // B: glowing runes on the border tops
+    const h = s2 / 2; gq([[x - h, y, z - h], [x - h, y, z + h], [x + h, y, z + h], [x + h, y, z - h]], GR.rune[rn], k, [1.1, .2, .16], [0, 1, 0]);
+  }
+  /* ---- build meshes ---- */
+  const mkGeo = (A) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(A.p, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(A.u, 2)); geo.setAttribute('color', new THREE.Float32BufferAttribute(A.c, 3)); return geo; };
+  const geo = mkGeo(M); geo.computeVertexNormals();
+  const mat = psx(new THREE.MeshLambertMaterial({ map: tex, vertexColors: true }), 1.0);
+  const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; scene.add(mesh);
+  const gmat = psx(new THREE.MeshBasicMaterial({ map: gtex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide }), 1.0);
+  const gmesh = new THREE.Mesh(mkGeo(GL), gmat); gmesh.frustumCulled = false; gmesh.renderOrder = 2; scene.add(gmesh);
+  boardTick = (t) => { gmat.opacity = 0.8 + 0.2 * Math.sin(t * 9) * Math.sin(t * 5.3 + 1) + 0.06 * Math.sin(t * 23); };
+  return { layout, walls, mesh, gmesh, tris: M.p.length / 9, gtris: GL.p.length / 9 };
+}
+let boardInfo = null;
+if (boardVar) boardInfo = buildBoard(boardVar, !params.has('nodemo')); else { scene.add(slab); rimMeshes.forEach((m) => scene.add(m)); }
 // moody floating shards in the void
 const shards = [];
 const shardGeo = new THREE.OctahedronGeometry(1, 0);
@@ -989,7 +1253,7 @@ function update(rawDt) {
     partMesh.instanceMatrix.needsUpdate = true;
     if (pLive === 0) { _pd.scale.set(0, 0, 0); _pd.updateMatrix(); partMesh.visible = false; }
   }
-  updateRite(rawDt);
+  updateRite(rawDt); if (boardTick) boardTick(simTime);
   if (deferred.length) { const fn = deferred.shift(); try { fn(); } catch (e) { console.error(e); } }
   // selection ring pulse
   if (selRing.visible) { const s = 1 + 0.05 * Math.sin(simTime * 12); selRing.scale.set(s, s, s); }
@@ -1057,7 +1321,7 @@ function frame(now) {
 /* Pre-warm: compile every shader program and upload every texture now (ghost, rings, labels, particles, dice),
    so nothing hitches the first time an effect appears. */
 function prewarm() {
-  [atlasTex, slabTop.map, ringTex, ...digits.slice(1).flat()].forEach((t) => renderer.initTexture(t));
+  [atlasTex, slabTop.map, ringTex, ...boardTexs, ...digits.slice(1).flat()].forEach((t) => renderer.initTexture(t));
   const objs = [ghost, selRing, tgtRing, ...Object.values(labels), partMesh, ...sigils.map((q) => q.m)], was = objs.map((o) => o.visible);
   objs.forEach((o) => { o.visible = true; });
   renderer.compile(scene, camera);
@@ -1072,6 +1336,7 @@ requestAnimationFrame(frame);
 window.__game = {
   THREE,
   get dice() { return dice.map((d) => ({ gx: d.gx, gy: d.gy, top: d.top, state: d.state })); },
+  get boardVar() { return boardVar; }, get boardInfo() { return boardInfo && { tris: boardInfo.tris, gtris: boardInfo.gtris }; },
   get riteDark() { return riteU.value; }, get sigilsLive() { return sigils.filter((q) => q.on).length; }, get res() { return [resU.value.x, resU.value.y]; },
   get score() { return score; }, get combo() { return combo; }, get over() { return gameOver; }, get spawnCount() { return spawnCount; },
   tileToScreen(gx, gy) { const r = app.getBoundingClientRect(); const p = new THREE.Vector3(wx(gx), H, wx(gy)).project(camera); return { x: r.left + (p.x * .5 + .5) * r.width, y: r.top + (-p.y * .5 + .5) * r.height }; },

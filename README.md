@@ -13,3 +13,6 @@ When ready: Railway → service → Settings → Networking → **+ Custom Domai
 1. `CNAME` – name `@` (apex) → the `<id>.up.railway.app` target Railway displays. The apex needs a DNS host that supports CNAME flattening / ALIAS (Cloudflare, Namecheap, DNSimple…); Route 53, GoDaddy, Squarespace do not – in that case point the nameservers at Cloudflare.
 2. `TXT` – name/value exactly as Railway displays (domain-ownership verification).
 Optional: `CNAME www` → `die-rite.com` (or its own Railway target) plus a redirect www → apex. If Cloudflare proxying (orange cloud) is on, set SSL/TLS mode to **Full** (not Strict). SSL (Let's Encrypt) is issued automatically within about an hour of the records resolving.
+
+## Board drafts (branch board-drafts, not deployed)
+`?board=a|b|c` swaps in a stone-tile board + themed border (`&nodemo` hides the example pit + wall). Data-driven via `layout` (tile/pit) and `walls` (edge segments) inside `buildBoard()`.
